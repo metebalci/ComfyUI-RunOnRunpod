@@ -59,6 +59,17 @@ app.registerExtension({
 
     async setup() {
 
+        // --- Helper to gather current settings ---
+        function getSettings() {
+            return {
+                apiKey: app.extensionManager.setting.get("Run on Runpod.Runpod.apiKey") || "",
+                endpointId: app.extensionManager.setting.get("Run on Runpod.Runpod.endpointId") || "",
+                s3AccessKey: app.extensionManager.setting.get("Run on Runpod.Runpod.s3AccessKey") || "",
+                s3SecretKey: app.extensionManager.setting.get("Run on Runpod.Runpod.s3SecretKey") || "",
+                volumeId: app.extensionManager.setting.get("Run on Runpod.Runpod.volumeId") || "",
+            };
+        }
+
         // --- Inject CSS ---
         const style = document.createElement("style");
         style.textContent = `
@@ -161,7 +172,10 @@ app.registerExtension({
 
         async function verifySettings() {
             try {
-                const res = await api.fetchApi("/RunOnRunpod/verify");
+                const res = await api.fetchApi("/RunOnRunpod/verify", {
+                    method: "POST",
+                    body: JSON.stringify({ settings: getSettings() }),
+                });
                 const data = await res.json();
                 if (data.runpod_api && data.s3_storage) {
                     settingsOk = true;
@@ -246,7 +260,10 @@ app.registerExtension({
             setState(STATE.QUEUED);
             pollInterval = setInterval(async () => {
                 try {
-                    const res = await api.fetchApi(`/RunOnRunpod/status/${jobId}`);
+                    const res = await api.fetchApi("/RunOnRunpod/status", {
+                        method: "POST",
+                        body: JSON.stringify({ job_id: jobId, settings: getSettings() }),
+                    });
                     const data = await res.json();
 
                     if (data.status === "IN_PROGRESS") {
@@ -302,7 +319,7 @@ app.registerExtension({
 
                     const res = await api.fetchApi("/RunOnRunpod/submit", {
                         method: "POST",
-                        body: JSON.stringify({ workflow: prompt.output }),
+                        body: JSON.stringify({ workflow: prompt.output, settings: getSettings() }),
                     });
                     const data = await res.json();
 
@@ -324,8 +341,9 @@ app.registerExtension({
                 // Cancel
                 if (!currentJobId) return;
                 try {
-                    await api.fetchApi(`/RunOnRunpod/cancel/${currentJobId}`, {
+                    await api.fetchApi("/RunOnRunpod/cancel", {
                         method: "POST",
+                        body: JSON.stringify({ job_id: currentJobId, settings: getSettings() }),
                     });
                 } catch (err) {
                     console.error("[RunOnRunpod] Cancel error:", err);

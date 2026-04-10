@@ -1,4 +1,3 @@
-import json
 import os
 import uuid
 
@@ -23,29 +22,6 @@ INPUT_NODE_FIELDS = {
 
 # RunPod S3 endpoint
 RUNPOD_S3_ENDPOINT = "https://s3.runpod.io"
-
-
-def _get_settings() -> dict:
-    """Read RunOnRunpod settings from ComfyUI's user settings file."""
-    try:
-        import folder_paths
-        comfy_root = folder_paths.base_path
-    except (ImportError, AttributeError):
-        comfy_root = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "..",
-        )
-    settings_path = os.path.join(comfy_root, "user", "default", "comfy.settings.json")
-    if not os.path.exists(settings_path):
-        return {}
-    with open(settings_path, "r") as f:
-        all_settings = json.load(f)
-    prefix = "Run on Runpod."
-    return {
-        k.removeprefix(prefix): v
-        for k, v in all_settings.items()
-        if k.startswith(prefix)
-    }
 
 
 def _get_input_directory() -> str:
@@ -74,32 +50,29 @@ def _scan_input_files(workflow: dict) -> dict:
     return files
 
 
-def _get_s3_client_from_settings(settings: dict):
+def _make_s3_client(settings: dict):
     """Create S3 client from settings for RunPod network volume."""
     return get_s3_client({
         "s3_endpoint": RUNPOD_S3_ENDPOINT,
-        "s3_access_key": settings.get("Runpod.s3AccessKey"),
-        "s3_secret_key": settings.get("Runpod.s3SecretKey"),
+        "s3_access_key": settings.get("s3AccessKey"),
+        "s3_secret_key": settings.get("s3SecretKey"),
     })
 
 
 # --- Routes ---
+# All routes receive settings from the frontend in the request body.
 
 
-@routes.get("/RunOnRunpod/settings")
-async def get_settings(request):
-    return web.json_response(_get_settings())
-
-
-@routes.get("/RunOnRunpod/verify")
+@routes.post("/RunOnRunpod/verify")
 async def verify_settings(request):
     """Verify RunPod API and S3 credentials."""
-    settings = _get_settings()
+    data = await request.json()
+    settings = data.get("settings", {})
     results = {"runpod_api": False, "s3_storage": False, "errors": []}
 
     # Check RunPod API key + endpoint
-    api_key = settings.get("Runpod.apiKey", "")
-    endpoint_id = settings.get("Runpod.endpointId", "")
+    api_key = settings.get("apiKey", "")
+    endpoint_id = settings.get("endpointId", "")
     if not api_key or not endpoint_id:
         results["errors"].append("API Key and Endpoint ID are required")
     else:
@@ -119,14 +92,14 @@ async def verify_settings(request):
             results["errors"].append(f"RunPod API error: {e}")
 
     # Check S3 credentials + volume
-    volume_id = settings.get("Runpod.volumeId", "")
-    s3_access = settings.get("Runpod.s3AccessKey", "")
-    s3_secret = settings.get("Runpod.s3SecretKey", "")
+    volume_id = settings.get("volumeId", "")
+    s3_access = settings.get("s3AccessKey", "")
+    s3_secret = settings.get("s3SecretKey", "")
     if not volume_id or not s3_access or not s3_secret:
         results["errors"].append("S3 credentials and Volume ID are required")
     else:
         try:
-            client = _get_s3_client_from_settings(settings)
+            client = _make_s3_client(settings)
             client.head_bucket(Bucket=volume_id)
             results["s3_storage"] = True
         except Exception as e:
@@ -139,17 +112,17 @@ async def verify_settings(request):
 async def submit_job(request):
     global _active_job
 
-    settings = _get_settings()
-    api_key = settings.get("Runpod.apiKey", "")
-    endpoint_id = settings.get("Runpod.endpointId", "")
+    data = await request.json()
+    settings = data.get("settings", {})
+    workflow = data.get("workflow", {})
+
+    api_key = settings.get("apiKey", "")
+    endpoint_id = settings.get("endpointId", "")
 
     if not api_key or not endpoint_id:
         return web.json_response(
             {"error": "RunPod API Key and Endpoint ID are required"}, status=400
         )
-
-    data = await request.json()
-    workflow = data.get("workflow", {})
 
     job_prefix = str(uuid.uuid4())[:8]
 
@@ -157,7 +130,7 @@ async def submit_job(request):
     input_files = {}
     input_file_refs = _scan_input_files(workflow)
 
-    volume_id = settings.get("Runpod.volumeId", "")
+    volume_id = settings.get("volumeId", "")
 
     if input_file_refs:
         if not volume_id:
@@ -166,7 +139,7 @@ async def submit_job(request):
                 status=400,
             )
 
-        client = _get_s3_client_from_settings(settings)
+        client = _make_s3_client(settings)
         input_dir = _get_input_directory()
 
         for filename in input_file_refs:
@@ -210,12 +183,14 @@ async def submit_job(request):
     })
 
 
-@routes.get("/RunOnRunpod/status/{job_id}")
+@routes.post("/RunOnRunpod/status")
 async def get_status(request):
-    job_id = request.match_info["job_id"]
-    settings = _get_settings()
-    api_key = settings.get("Runpod.apiKey", "")
-    endpoint_id = settings.get("Runpod.endpointId", "")
+    data = await request.json()
+    settings = data.get("settings", {})
+    job_id = data.get("job_id", "")
+
+    api_key = settings.get("apiKey", "")
+    endpoint_id = settings.get("endpointId", "")
 
     async with aiohttp.ClientSession() as session:
         async with session.get(
@@ -231,13 +206,16 @@ async def get_status(request):
     })
 
 
-@routes.post("/RunOnRunpod/cancel/{job_id}")
+@routes.post("/RunOnRunpod/cancel")
 async def cancel_job(request):
     global _active_job
-    job_id = request.match_info["job_id"]
-    settings = _get_settings()
-    api_key = settings.get("Runpod.apiKey", "")
-    endpoint_id = settings.get("Runpod.endpointId", "")
+
+    data = await request.json()
+    settings = data.get("settings", {})
+    job_id = data.get("job_id", "")
+
+    api_key = settings.get("apiKey", "")
+    endpoint_id = settings.get("endpointId", "")
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
