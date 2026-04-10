@@ -70,15 +70,15 @@ def save_outputs(output_files: list[str], job_prefix: str) -> list[str]:
 
     Returns list of output filenames on the volume.
     """
-    os.makedirs(VOLUME_OUTPUTS_DIR, exist_ok=True)
+    job_dir = os.path.join(VOLUME_OUTPUTS_DIR, job_prefix)
+    os.makedirs(job_dir, exist_ok=True)
     saved = []
     for file_path in output_files:
-        ext = os.path.splitext(file_path)[1]
-        out_name = f"{job_prefix}_{uuid.uuid4().hex[:8]}{ext}"
-        dest = os.path.join(VOLUME_OUTPUTS_DIR, out_name)
+        filename = os.path.basename(file_path)
+        dest = os.path.join(job_dir, filename)
         print(f"[RunOnRunpod] Saving output: {file_path} -> {dest}")
         shutil.copy2(file_path, dest)
-        saved.append(out_name)
+        saved.append(f"{job_prefix}/{filename}")
     return saved
 
 

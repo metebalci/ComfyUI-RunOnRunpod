@@ -88,7 +88,7 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
    - **Blue (pulsing)** — running
    - **Green** — completed
    - **Red** — failed
-4. On completion, a notification appears with the output count. Outputs are saved to the `/outputs/` directory on the network volume.
+4. Outputs are saved to `/outputs/{job-id}/` on the network volume
 5. Click the button while a job is running to cancel it
 
 ## Storage Architecture
