@@ -38,7 +38,7 @@ def _get_settings() -> dict:
         return {}
     with open(settings_path, "r") as f:
         all_settings = json.load(f)
-    prefix = "RunOnRunpod."
+    prefix = "Run on RunPod."
     return {
         k.removeprefix(prefix): v
         for k, v in all_settings.items()

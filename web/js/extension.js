@@ -19,31 +19,31 @@ app.registerExtension({
 
     settings: [
         {
-            id: "RunOnRunpod.RunPod.endpointId",
+            id: "Run on RunPod.RunPod.endpointId",
             name: "Endpoint ID",
             type: "text",
             defaultValue: "",
         },
         {
-            id: "RunOnRunpod.RunPod.apiKey",
+            id: "Run on RunPod.RunPod.apiKey",
             name: "API Key",
             type: "text",
             defaultValue: "",
         },
         {
-            id: "RunOnRunpod.Storage.volumeId",
+            id: "Run on RunPod.Storage.volumeId",
             name: "Network Volume ID",
             type: "text",
             defaultValue: "",
         },
         {
-            id: "RunOnRunpod.Storage.s3SecretKey",
+            id: "Run on RunPod.Storage.s3SecretKey",
             name: "S3 Secret Key",
             type: "text",
             defaultValue: "",
         },
         {
-            id: "RunOnRunpod.Storage.s3AccessKey",
+            id: "Run on RunPod.Storage.s3AccessKey",
             name: "S3 Access Key",
             type: "text",
             defaultValue: "",
