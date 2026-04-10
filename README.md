@@ -26,6 +26,10 @@ A Docker image that runs ComfyUI on RunPod. The worker:
 
 ### 1. Prepare the worker
 
+A pre-built image is available at `docker.io/metebalci/comfyui-runonrunpod:latest` with the custom nodes listed in `worker/custom_nodes.txt`.
+
+To build your own image with different custom nodes:
+
 1. Edit `worker/custom_nodes.txt` to list the custom nodes you need (one git URL per line)
 2. Build the Docker image:
    ```bash
@@ -33,7 +37,8 @@ A Docker image that runs ComfyUI on RunPod. The worker:
    docker build -t comfyui-runonrunpod .
    ```
 3. Push to Docker Hub or another registry
-4. Create a RunPod Serverless endpoint using the image, with a network volume attached for models
+
+Then create a RunPod Serverless endpoint using the image, with a network volume attached for models.
 
 ### 2. Install the plugin
 
