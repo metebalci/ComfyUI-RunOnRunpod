@@ -38,7 +38,7 @@ def _get_settings() -> dict:
         return {}
     with open(settings_path, "r") as f:
         all_settings = json.load(f)
-    prefix = "Run on RunPod."
+    prefix = "Run on Runpod."
     return {
         k.removeprefix(prefix): v
         for k, v in all_settings.items()
@@ -76,8 +76,8 @@ def _get_s3_client_from_settings(settings: dict):
     """Create S3 client from settings for RunPod network volume."""
     return get_s3_client({
         "s3_endpoint": RUNPOD_S3_ENDPOINT,
-        "s3_access_key": settings.get("RunPod.s3AccessKey"),
-        "s3_secret_key": settings.get("RunPod.s3SecretKey"),
+        "s3_access_key": settings.get("Runpod.s3AccessKey"),
+        "s3_secret_key": settings.get("Runpod.s3SecretKey"),
     })
 
 
@@ -94,8 +94,8 @@ async def submit_job(request):
     global _active_job
 
     settings = _get_settings()
-    api_key = settings.get("RunPod.apiKey", "")
-    endpoint_id = settings.get("RunPod.endpointId", "")
+    api_key = settings.get("Runpod.apiKey", "")
+    endpoint_id = settings.get("Runpod.endpointId", "")
 
     if not api_key or not endpoint_id:
         return web.json_response(
@@ -111,7 +111,7 @@ async def submit_job(request):
     input_files = {}
     input_file_refs = _scan_input_files(workflow)
 
-    volume_id = settings.get("RunPod.volumeId", "")
+    volume_id = settings.get("Runpod.volumeId", "")
 
     if input_file_refs:
         if not volume_id:
@@ -168,8 +168,8 @@ async def submit_job(request):
 async def get_status(request):
     job_id = request.match_info["job_id"]
     settings = _get_settings()
-    api_key = settings.get("RunPod.apiKey", "")
-    endpoint_id = settings.get("RunPod.endpointId", "")
+    api_key = settings.get("Runpod.apiKey", "")
+    endpoint_id = settings.get("Runpod.endpointId", "")
 
     async with aiohttp.ClientSession() as session:
         async with session.get(
@@ -190,8 +190,8 @@ async def cancel_job(request):
     global _active_job
     job_id = request.match_info["job_id"]
     settings = _get_settings()
-    api_key = settings.get("RunPod.apiKey", "")
-    endpoint_id = settings.get("RunPod.endpointId", "")
+    api_key = settings.get("Runpod.apiKey", "")
+    endpoint_id = settings.get("Runpod.endpointId", "")
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
