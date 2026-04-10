@@ -20,14 +20,45 @@ app.registerExtension({
 
     settings: [
         {
+            id: "RunOnRunpod.RunPod.endpointId",
+            name: "RunPod Endpoint ID",
+            type: "text",
+            defaultValue: "",
+        },
+        {
             id: "RunOnRunpod.RunPod.apiKey",
             name: "RunPod API Key",
             type: "text",
             defaultValue: "",
         },
         {
-            id: "RunOnRunpod.RunPod.endpointId",
-            name: "RunPod Endpoint ID",
+            id: "RunOnRunpod.S3.maxOutputUrls",
+            name: "Max Output URLs per Job",
+            type: "number",
+            defaultValue: 5,
+            attrs: { min: 1, max: 50, step: 1 },
+        },
+        {
+            id: "RunOnRunpod.S3.bucket",
+            name: "S3 Bucket",
+            type: "text",
+            defaultValue: "",
+        },
+        {
+            id: "RunOnRunpod.S3.secretKey",
+            name: "S3 Secret Key",
+            type: "text",
+            defaultValue: "",
+        },
+        {
+            id: "RunOnRunpod.S3.accessKey",
+            name: "S3 Access Key",
+            type: "text",
+            defaultValue: "",
+        },
+        {
+            id: "RunOnRunpod.S3.endpoint",
+            name: "S3 Endpoint",
             type: "text",
             defaultValue: "",
         },
@@ -43,37 +74,6 @@ app.registerExtension({
                 { text: "RunPod", value: "runpod" },
                 { text: "Custom", value: "custom" },
             ],
-        },
-        {
-            id: "RunOnRunpod.S3.endpoint",
-            name: "S3 Endpoint",
-            type: "text",
-            defaultValue: "",
-        },
-        {
-            id: "RunOnRunpod.S3.accessKey",
-            name: "S3 Access Key",
-            type: "text",
-            defaultValue: "",
-        },
-        {
-            id: "RunOnRunpod.S3.secretKey",
-            name: "S3 Secret Key",
-            type: "text",
-            defaultValue: "",
-        },
-        {
-            id: "RunOnRunpod.S3.bucket",
-            name: "S3 Bucket",
-            type: "text",
-            defaultValue: "",
-        },
-        {
-            id: "RunOnRunpod.S3.maxOutputUrls",
-            name: "Max Output URLs per Job",
-            type: "number",
-            defaultValue: 5,
-            attrs: { min: 1, max: 50, step: 1 },
         },
     ],
 
