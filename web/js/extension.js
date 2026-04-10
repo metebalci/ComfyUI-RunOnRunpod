@@ -14,7 +14,11 @@ let currentState = STATE.IDLE;
 let currentJobId = null;
 let pollInterval = null;
 let _verifyCallback = null;
-const onSettingChanged = () => { if (_verifyCallback) _verifyCallback(); };
+let _verifyTimeout = null;
+const onSettingChanged = () => {
+    if (_verifyTimeout) clearTimeout(_verifyTimeout);
+    _verifyTimeout = setTimeout(() => { if (_verifyCallback) _verifyCallback(); }, 2000);
+};
 
 app.registerExtension({
     name: "RunOnRunpod",
