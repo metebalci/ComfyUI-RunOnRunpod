@@ -192,31 +192,25 @@ app.registerExtension({
                     btn.textContent = "Run on RunPod";
                     if (!settingsOk) {
                         btn.classList.add("settings-error");
-                        btn.title = "Settings error — click to retry or check settings";
                     } else {
                         btn.classList.remove("settings-error");
-                        btn.title = "Run on RunPod";
                     }
                     break;
                 case STATE.QUEUED:
                     btn.textContent = "Queued...";
-                    btn.title = "Click to cancel";
                     btn.classList.add("queued");
                     break;
                 case STATE.RUNNING:
                     btn.textContent = "Running...";
-                    btn.title = "Click to cancel";
                     btn.classList.add("running");
                     break;
                 case STATE.COMPLETED:
                     btn.textContent = "Completed";
-                    btn.title = "Run on RunPod";
                     btn.classList.add("completed");
                     setTimeout(() => setState(STATE.IDLE), 3000);
                     break;
                 case STATE.FAILED:
                     btn.textContent = "Failed";
-                    btn.title = "Run on RunPod";
                     btn.classList.add("failed");
                     setTimeout(() => setState(STATE.IDLE), 3000);
                     break;
