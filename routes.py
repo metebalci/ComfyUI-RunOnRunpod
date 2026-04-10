@@ -76,8 +76,8 @@ def _get_s3_client_from_settings(settings: dict):
     """Create S3 client from settings for RunPod network volume."""
     return get_s3_client({
         "s3_endpoint": RUNPOD_S3_ENDPOINT,
-        "s3_access_key": settings.get("Storage.s3AccessKey"),
-        "s3_secret_key": settings.get("Storage.s3SecretKey"),
+        "s3_access_key": settings.get("RunPod.s3AccessKey"),
+        "s3_secret_key": settings.get("RunPod.s3SecretKey"),
     })
 
 
@@ -111,7 +111,7 @@ async def submit_job(request):
     input_files = {}
     input_file_refs = _scan_input_files(workflow)
 
-    volume_id = settings.get("Storage.volumeId", "")
+    volume_id = settings.get("RunPod.volumeId", "")
 
     if input_file_refs:
         if not volume_id:
