@@ -251,12 +251,20 @@ async def get_status(request):
         })
 
     status = result.get("status", "UNKNOWN")
-    log.info(f"Job {job_id}: {status}")
+    error = result.get("error")
+    output = result.get("output")
+
+    if status == "FAILED":
+        log.error(f"Job {job_id} FAILED: {error or output}")
+    elif status in ("CANCELLED", "TIMED_OUT"):
+        log.error(f"Job {job_id}: {status}")
+    else:
+        log.info(f"Job {job_id}: {status}")
 
     return web.json_response({
         "status": status,
-        "output": result.get("output"),
-        "error": result.get("error"),
+        "output": output,
+        "error": error,
     })
 
 
