@@ -257,10 +257,12 @@ app.registerExtension({
                     return;
                 }
 
+                // Immediately show we're working
+                setState(STATE.QUEUED);
+
                 // Submit
                 try {
                     const prompt = await app.graphToPrompt();
-                    setState(STATE.QUEUED);
 
                     const res = await api.fetchApi("/RunOnRunpod/submit", {
                         method: "POST",
