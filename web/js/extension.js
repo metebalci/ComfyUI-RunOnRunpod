@@ -387,16 +387,9 @@ app.registerExtension({
 
         // --- Insert button into menu ---
         const insertButton = () => {
-            // New menu: insert inside the actionbar, next to the queue button group
             const actionbar = document.querySelector(".actionbar-container");
             if (actionbar) {
                 actionbar.appendChild(wrapper);
-                return true;
-            }
-            // Legacy menu
-            const legacyMenu = document.querySelector(".comfy-menu");
-            if (legacyMenu) {
-                legacyMenu.appendChild(wrapper);
                 return true;
             }
             return false;

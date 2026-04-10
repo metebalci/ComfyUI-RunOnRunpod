@@ -52,6 +52,8 @@ pip install -r ComfyUI-RunOnRunpod/requirements.txt
 
 Restart ComfyUI.
 
+**Note:** This plugin requires the new menu (Settings -> "Use new menu" -> "Top"). The legacy menu is not supported.
+
 ### 3. Configure
 
 Open ComfyUI Settings and find the **RunOnRunpod** section:
