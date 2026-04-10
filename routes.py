@@ -108,7 +108,8 @@ async def verify_settings(request):
         except Exception as e:
             results["errors"].append(f"S3 storage error: {e}")
 
-    log.info(f"Verify result: runpod_api={results['runpod_api']}, s3_storage={results['s3_storage']}, errors={results['errors']}")
+    if results["errors"]:
+        log.error(f"Verify failed: {results['errors']}")
     return web.json_response(results)
 
 
