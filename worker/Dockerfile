@@ -10,8 +10,9 @@ RUN apt-get update && apt-get install -y \
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install ComfyUI
-RUN git clone https://github.com/comfyanonymous/ComfyUI.git /comfyui
+# Install ComfyUI at a specific tag (passed via build arg)
+ARG COMFYUI_TAG=latest
+RUN git clone --branch "${COMFYUI_TAG}" --depth 1 https://github.com/comfyanonymous/ComfyUI.git /comfyui
 WORKDIR /comfyui
 RUN pip install -r requirements.txt
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
