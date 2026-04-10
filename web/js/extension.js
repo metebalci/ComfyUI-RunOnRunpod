@@ -108,12 +108,11 @@ app.registerExtension({
                 50% { opacity: 0.6; }
             }
             .runpod-btn.settings-error {
-                background: #d9534f;
-                animation: runpod-blink-red 1.5s ease-in-out infinite;
+                animation: runpod-blink-red 1s steps(1) infinite;
             }
             @keyframes runpod-blink-red {
-                0%, 100% { background: #d9534f; }
-                50% { background: #8b2020; }
+                0%, 50% { background: #d9534f; }
+                50.1%, 100% { background: #4a9a5c; }
             }
             .runpod-notification {
                 position: fixed;
