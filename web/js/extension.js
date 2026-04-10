@@ -244,20 +244,16 @@ app.registerExtension({
         // --- Click handler: submit or cancel ---
         btn.addEventListener("click", async () => {
             if (currentState === STATE.IDLE) {
-                // Verify settings first
-                try {
-                    const verifyRes = await api.fetchApi("/RunOnRunpod/verify", {
-                        method: "POST",
-                        body: JSON.stringify({ settings: getSettings() }),
-                    });
-                    const verifyData = await verifyRes.json();
-                    if (!verifyData.runpod_api || !verifyData.s3_storage) {
-                        const errors = (verifyData.errors || []).join(", ");
-                        showNotification("Settings error: " + errors, true);
-                        return;
-                    }
-                } catch (err) {
-                    showNotification("Failed to verify settings", true);
+                // Quick local check first
+                const s = getSettings();
+                const missing = [];
+                if (!s.apiKey) missing.push("API Key");
+                if (!s.endpointId) missing.push("Endpoint ID");
+                if (!s.s3AccessKey) missing.push("S3 Access Key");
+                if (!s.s3SecretKey) missing.push("S3 Secret Key");
+                if (!s.volumeId) missing.push("Network Volume ID");
+                if (missing.length > 0) {
+                    showNotification("Missing settings: " + missing.join(", "), true);
                     return;
                 }
 
