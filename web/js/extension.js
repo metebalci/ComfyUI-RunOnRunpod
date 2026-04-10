@@ -113,16 +113,17 @@ app.registerExtension({
             }
             .runpod-notification {
                 position: fixed;
-                bottom: 20px;
-                right: 20px;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
                 background: #333;
                 color: #fff;
-                padding: 12px 16px;
+                padding: 16px 24px;
                 border-radius: 8px;
-                max-width: 400px;
+                max-width: 500px;
                 z-index: 10000;
-                font-size: 13px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                font-size: 14px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
             }
             .runpod-notification .close-btn {
                 position: absolute;
