@@ -1,14 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const S3_PROVIDER_ENDPOINTS = {
-    aws: "",
-    r2: "https://{account_id}.r2.cloudflarestorage.com",
-    gcs: "https://storage.googleapis.com",
-    runpod: "",
-    custom: "",
-};
-
 // --- State machine ---
 const STATE = {
     IDLE: "idle",
@@ -23,28 +15,24 @@ let currentJobId = null;
 let outputGetUrls = {};
 let pollInterval = null;
 
-const SETTINGS_CATEGORY = ["RunOnRunpod", "Settings"];
-
 app.registerExtension({
     name: "RunOnRunpod",
 
     settings: [
         {
-            id: "RunOnRunpod.apiKey",
+            id: "RunOnRunpod.RunPod.apiKey",
             name: "RunPod API Key",
             type: "text",
             defaultValue: "",
-            category: SETTINGS_CATEGORY,
         },
         {
-            id: "RunOnRunpod.endpointId",
+            id: "RunOnRunpod.RunPod.endpointId",
             name: "RunPod Endpoint ID",
             type: "text",
             defaultValue: "",
-            category: SETTINGS_CATEGORY,
         },
         {
-            id: "RunOnRunpod.s3Provider",
+            id: "RunOnRunpod.S3.provider",
             name: "S3 Provider",
             type: "combo",
             defaultValue: "aws",
@@ -55,43 +43,37 @@ app.registerExtension({
                 { text: "RunPod", value: "runpod" },
                 { text: "Custom", value: "custom" },
             ],
-            category: SETTINGS_CATEGORY,
         },
         {
-            id: "RunOnRunpod.s3Endpoint",
+            id: "RunOnRunpod.S3.endpoint",
             name: "S3 Endpoint",
             type: "text",
             defaultValue: "",
-            category: SETTINGS_CATEGORY,
         },
         {
-            id: "RunOnRunpod.s3AccessKey",
+            id: "RunOnRunpod.S3.accessKey",
             name: "S3 Access Key",
             type: "text",
             defaultValue: "",
-            category: SETTINGS_CATEGORY,
         },
         {
-            id: "RunOnRunpod.s3SecretKey",
+            id: "RunOnRunpod.S3.secretKey",
             name: "S3 Secret Key",
             type: "text",
             defaultValue: "",
-            category: SETTINGS_CATEGORY,
         },
         {
-            id: "RunOnRunpod.s3Bucket",
+            id: "RunOnRunpod.S3.bucket",
             name: "S3 Bucket",
             type: "text",
             defaultValue: "",
-            category: SETTINGS_CATEGORY,
         },
         {
-            id: "RunOnRunpod.maxOutputUrls",
+            id: "RunOnRunpod.S3.maxOutputUrls",
             name: "Max Output URLs per Job",
             type: "number",
             defaultValue: 5,
             attrs: { min: 1, max: 50, step: 1 },
-            category: SETTINGS_CATEGORY,
         },
     ],
 

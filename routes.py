@@ -90,8 +90,8 @@ async def submit_job(request):
     global _active_job
 
     settings = _get_settings()
-    api_key = settings.get("apiKey", "")
-    endpoint_id = settings.get("endpointId", "")
+    api_key = settings.get("RunPod.apiKey", "")
+    endpoint_id = settings.get("RunPod.endpointId", "")
 
     if not api_key or not endpoint_id:
         return web.json_response(
@@ -109,11 +109,11 @@ async def submit_job(request):
 
     if input_file_refs:
         s3_settings = {
-            "s3_endpoint": settings.get("s3Endpoint"),
-            "s3_access_key": settings.get("s3AccessKey"),
-            "s3_secret_key": settings.get("s3SecretKey"),
+            "s3_endpoint": settings.get("S3.endpoint"),
+            "s3_access_key": settings.get("S3.accessKey"),
+            "s3_secret_key": settings.get("S3.secretKey"),
         }
-        bucket = settings.get("s3Bucket", "")
+        bucket = settings.get("S3.bucket", "")
 
         if not all([s3_settings["s3_access_key"], s3_settings["s3_secret_key"], bucket]):
             return web.json_response(
@@ -136,14 +136,14 @@ async def submit_job(request):
 
     # Generate presigned PUT URLs for outputs
     output_urls = {}
-    max_outputs = int(settings.get("maxOutputUrls", 5))
+    max_outputs = int(settings.get("S3.maxOutputUrls", 5))
 
     s3_settings = {
-        "s3_endpoint": settings.get("s3Endpoint"),
-        "s3_access_key": settings.get("s3AccessKey"),
-        "s3_secret_key": settings.get("s3SecretKey"),
+        "s3_endpoint": settings.get("S3.endpoint"),
+        "s3_access_key": settings.get("S3.accessKey"),
+        "s3_secret_key": settings.get("S3.secretKey"),
     }
-    bucket = settings.get("s3Bucket", "")
+    bucket = settings.get("S3.bucket", "")
 
     if all([s3_settings.get("s3_access_key"), s3_settings.get("s3_secret_key"), bucket]):
         client = get_s3_client(s3_settings)
@@ -193,8 +193,8 @@ async def submit_job(request):
 async def get_status(request):
     job_id = request.match_info["job_id"]
     settings = _get_settings()
-    api_key = settings.get("apiKey", "")
-    endpoint_id = settings.get("endpointId", "")
+    api_key = settings.get("RunPod.apiKey", "")
+    endpoint_id = settings.get("RunPod.endpointId", "")
 
     async with aiohttp.ClientSession() as session:
         async with session.get(
@@ -215,8 +215,8 @@ async def cancel_job(request):
     global _active_job
     job_id = request.match_info["job_id"]
     settings = _get_settings()
-    api_key = settings.get("apiKey", "")
-    endpoint_id = settings.get("endpointId", "")
+    api_key = settings.get("RunPod.apiKey", "")
+    endpoint_id = settings.get("RunPod.endpointId", "")
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
