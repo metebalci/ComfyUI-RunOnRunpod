@@ -104,17 +104,22 @@ app.registerExtension({
                 display: flex;
                 align-items: center;
                 gap: 4px;
+                height: 100%;
             }
             .runpod-btn {
                 padding: 4px 12px;
-                border: 1px solid #666;
-                border-radius: 4px;
+                border: none;
+                border-radius: 8px;
                 cursor: pointer;
-                font-size: 13px;
-                font-weight: 500;
-                background: #ffffff;
-                color: #000;
-                transition: background 0.3s, border-color 0.3s;
+                font-size: 14px;
+                font-weight: 300;
+                font-family: Inter, sans-serif;
+                background: var(--comfy-secondary-background, #333);
+                color: var(--comfy-base-foreground, #fff);
+                transition: background 0.3s;
+                height: 32px;
+                display: inline-flex;
+                align-items: center;
             }
             .runpod-btn:disabled {
                 cursor: not-allowed;
@@ -382,10 +387,10 @@ app.registerExtension({
 
         // --- Insert button into menu ---
         const insertButton = () => {
-            // New menu
-            const newMenu = document.querySelector(".comfyui-menu");
-            if (newMenu) {
-                newMenu.appendChild(wrapper);
+            // New menu: insert inside the actionbar, next to the queue button group
+            const actionbar = document.querySelector(".actionbar-container");
+            if (actionbar) {
+                actionbar.appendChild(wrapper);
                 return true;
             }
             // Legacy menu
