@@ -44,21 +44,10 @@ app.registerExtension({
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3Provider",
-            name: "S3 Provider",
-            type: "combo",
+            name: "S3 Provider (aws / r2 / gcs / runpod / custom)",
+            type: "text",
             defaultValue: "aws",
-            options: [
-                { text: "AWS S3", value: "aws" },
-                { text: "Cloudflare R2", value: "r2" },
-                { text: "Google Cloud Storage", value: "gcs" },
-                { text: "RunPod", value: "runpod" },
-                { text: "Custom", value: "custom" },
-            ],
             category: ["RunOnRunpod", "S3 Storage"],
-            onChange: (value) => {
-                const endpoint = S3_PROVIDER_ENDPOINTS[value] || "";
-                app.ui.settings.setSettingValue("RunOnRunpod.s3Endpoint", endpoint);
-            },
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3Endpoint",
