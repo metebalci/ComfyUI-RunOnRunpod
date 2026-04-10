@@ -100,6 +100,34 @@ app.registerExtension({
                 0%, 100% { opacity: 1; }
                 50% { opacity: 0.6; }
             }
+            .runpod-verify {
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                border: none;
+                cursor: pointer;
+                font-size: 11px;
+                line-height: 20px;
+                text-align: center;
+                background: #888;
+                color: #fff;
+                transition: background 0.3s;
+                padding: 0;
+                flex-shrink: 0;
+            }
+            .runpod-verify:hover {
+                opacity: 0.85;
+            }
+            .runpod-verify.ok {
+                background: #4a9a5c;
+            }
+            .runpod-verify.fail {
+                background: #d9534f;
+            }
+            .runpod-verify.checking {
+                background: #888;
+                animation: runpod-pulse 1s ease-in-out infinite;
+            }
             .runpod-notification {
                 position: fixed;
                 bottom: 20px;
@@ -135,12 +163,44 @@ app.registerExtension({
         const wrapper = document.createElement("div");
         wrapper.className = "runpod-btn-wrapper";
 
+        const verifyBtn = document.createElement("button");
+        verifyBtn.textContent = "✓";
+        verifyBtn.className = "runpod-verify";
+        verifyBtn.title = "Verifying settings...";
+
         const btn = document.createElement("button");
         btn.textContent = "Run on RunPod";
         btn.className = "runpod-btn";
         btn.title = "Run on RunPod";
 
+        wrapper.appendChild(verifyBtn);
         wrapper.appendChild(btn);
+
+        // --- Verify settings ---
+        async function verifySettings() {
+            verifyBtn.className = "runpod-verify checking";
+            verifyBtn.title = "Verifying settings...";
+            try {
+                const res = await api.fetchApi("/RunOnRunpod/verify");
+                const data = await res.json();
+                if (data.runpod_api && data.s3_storage) {
+                    verifyBtn.className = "runpod-verify ok";
+                    verifyBtn.title = "Settings OK";
+                } else {
+                    verifyBtn.className = "runpod-verify fail";
+                    verifyBtn.title = (data.errors || []).join("\n") || "Verification failed";
+                }
+            } catch (err) {
+                verifyBtn.className = "runpod-verify fail";
+                verifyBtn.title = "Verification error";
+            }
+        }
+
+        // Click to re-verify
+        verifyBtn.addEventListener("click", verifySettings);
+
+        // Verify on startup
+        verifySettings();
 
         // --- State management ---
         function setState(state) {

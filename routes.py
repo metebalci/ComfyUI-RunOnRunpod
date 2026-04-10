@@ -89,6 +89,50 @@ async def get_settings(request):
     return web.json_response(_get_settings())
 
 
+@routes.get("/RunOnRunpod/verify")
+async def verify_settings(request):
+    """Verify RunPod API and S3 credentials."""
+    settings = _get_settings()
+    results = {"runpod_api": False, "s3_storage": False, "errors": []}
+
+    # Check RunPod API key + endpoint
+    api_key = settings.get("Runpod.apiKey", "")
+    endpoint_id = settings.get("Runpod.endpointId", "")
+    if not api_key or not endpoint_id:
+        results["errors"].append("API Key and Endpoint ID are required")
+    else:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.runpod.ai/v2/{endpoint_id}/health",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                ) as resp:
+                    if resp.status == 200:
+                        results["runpod_api"] = True
+                    else:
+                        results["errors"].append(
+                            f"RunPod API returned status {resp.status}"
+                        )
+        except Exception as e:
+            results["errors"].append(f"RunPod API error: {e}")
+
+    # Check S3 credentials + volume
+    volume_id = settings.get("Runpod.volumeId", "")
+    s3_access = settings.get("Runpod.s3AccessKey", "")
+    s3_secret = settings.get("Runpod.s3SecretKey", "")
+    if not volume_id or not s3_access or not s3_secret:
+        results["errors"].append("S3 credentials and Volume ID are required")
+    else:
+        try:
+            client = _get_s3_client_from_settings(settings)
+            client.head_bucket(Bucket=volume_id)
+            results["s3_storage"] = True
+        except Exception as e:
+            results["errors"].append(f"S3 storage error: {e}")
+
+    return web.json_response(results)
+
+
 @routes.post("/RunOnRunpod/submit")
 async def submit_job(request):
     global _active_job
