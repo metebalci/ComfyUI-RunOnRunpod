@@ -30,7 +30,7 @@ A Docker image that runs ComfyUI on RunPod. The worker:
 2. Build the Docker image:
    ```bash
    cd worker
-   docker build -t comfyui-runpod .
+   docker build -t comfyui-runonrunpod .
    ```
 3. Push to Docker Hub or another registry
 4. Create a RunPod Serverless endpoint using the image, with a network volume attached for models
@@ -42,7 +42,7 @@ Clone this repo into your ComfyUI custom nodes directory:
 ```bash
 cd ComfyUI/custom_nodes
 git clone https://github.com/metebalci/ComfyUI-RunOnRunpod.git
-pip install boto3
+pip install -r ComfyUI-RunOnRunpod/requirements.txt
 ```
 
 Restart ComfyUI.

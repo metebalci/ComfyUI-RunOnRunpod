@@ -1,14 +1,25 @@
 [project]
 name = "comfyui-runonrunpod"
-version = "0.1.0"
 description = "Run ComfyUI workflows on RunPod Serverless"
+version = "0.1.0"
+license = {file = "LICENSE"}
 requires-python = ">=3.10"
 dependencies = [
     "boto3",
     "aiohttp",
 ]
+classifiers = [
+    "Environment :: GPU :: NVIDIA CUDA",
+]
+
+[project.urls]
+Repository = "https://github.com/metebalci/ComfyUI-RunOnRunpod"
+Documentation = "https://github.com/metebalci/ComfyUI-RunOnRunpod/wiki"
+"Bug Tracker" = "https://github.com/metebalci/ComfyUI-RunOnRunpod/issues"
 
 [tool.comfy]
-PublisherId = "runonrunpod"
+PublisherId = "metebalci"
 DisplayName = "Run on RunPod"
 Icon = ""
+includes = []
+"requires-comfyui" = ">=0.16.4"
