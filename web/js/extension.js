@@ -189,7 +189,6 @@ app.registerExtension({
 
             switch (state) {
                 case STATE.IDLE:
-                    btn.textContent = "Run on RunPod";
                     if (!settingsOk) {
                         btn.classList.add("settings-error");
                     } else {
@@ -197,20 +196,16 @@ app.registerExtension({
                     }
                     break;
                 case STATE.QUEUED:
-                    btn.textContent = "Queued...";
                     btn.classList.add("queued");
                     break;
                 case STATE.RUNNING:
-                    btn.textContent = "Running...";
                     btn.classList.add("running");
                     break;
                 case STATE.COMPLETED:
-                    btn.textContent = "Completed";
                     btn.classList.add("completed");
                     setTimeout(() => setState(STATE.IDLE), 3000);
                     break;
                 case STATE.FAILED:
-                    btn.textContent = "Failed";
                     btn.classList.add("failed");
                     setTimeout(() => setState(STATE.IDLE), 3000);
                     break;
