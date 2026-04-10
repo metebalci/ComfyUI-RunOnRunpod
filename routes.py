@@ -130,22 +130,51 @@ async def submit_job(request):
             {"error": "RunPod API Key and Endpoint ID are required"}, status=400
         )
 
+    volume_id = settings.get("volumeId", "")
+    s3_access = settings.get("s3AccessKey", "")
+    s3_secret = settings.get("s3SecretKey", "")
+
+    if not volume_id or not s3_access or not s3_secret:
+        log.error("S3 credentials and Volume ID are required")
+        return web.json_response(
+            {"error": "S3 credentials and Volume ID are required"}, status=400
+        )
+
+    # Validate RunPod API
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://api.runpod.ai/v2/{endpoint_id}/health",
+                headers={"Authorization": f"Bearer {api_key}"},
+            ) as resp:
+                if resp.status != 200:
+                    log.error(f"RunPod API health check failed: {resp.status}")
+                    return web.json_response(
+                        {"error": f"RunPod API health check failed (status {resp.status})"}, status=400
+                    )
+    except Exception as e:
+        log.error(f"RunPod API health check error: {e}")
+        return web.json_response(
+            {"error": f"RunPod API error: {e}"}, status=400
+        )
+
+    # Validate S3 access
+    try:
+        client = _make_s3_client(settings)
+        client.head_bucket(Bucket=volume_id)
+    except Exception as e:
+        log.error(f"S3 storage validation failed: {e}")
+        return web.json_response(
+            {"error": f"S3 storage error: {e}"}, status=400
+        )
+
     job_prefix = str(uuid.uuid4())[:8]
 
     # Upload input files to network volume via S3
     input_files = {}
     input_file_refs = _scan_input_files(workflow)
 
-    volume_id = settings.get("volumeId", "")
-
     if input_file_refs:
-        if not volume_id:
-            return web.json_response(
-                {"error": "Network Volume ID required for workflows with input files"},
-                status=400,
-            )
-
-        client = _make_s3_client(settings)
         input_dir = _get_input_directory()
 
         for filename in input_file_refs:
