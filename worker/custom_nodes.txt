@@ -1,4 +1,3 @@
 # Custom nodes for the RunPod worker.
 # One git URL per line. Lines starting with # are comments.
-https://github.com/ltdrdata/ComfyUI-Manager.git
 https://github.com/cubiq/ComfyUI_essentials.git
