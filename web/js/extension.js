@@ -179,8 +179,9 @@ app.registerExtension({
             }
         }
 
-        // Verify on startup
+        // Verify on startup and periodically
         verifySettings();
+        setInterval(verifySettings, 30000);
 
         // --- State management ---
         function setState(state) {
