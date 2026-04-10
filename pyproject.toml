@@ -1,0 +1,14 @@
+[project]
+name = "comfyui-runonrunpod"
+version = "0.1.0"
+description = "Run ComfyUI workflows on RunPod Serverless"
+requires-python = ">=3.10"
+dependencies = [
+    "boto3",
+    "aiohttp",
+]
+
+[tool.comfy]
+PublisherId = "runonrunpod"
+DisplayName = "Run on RunPod"
+Icon = ""
