@@ -1,9 +1,12 @@
+import logging
 import os
 import uuid
 
 import aiohttp
 from aiohttp import web
 from server import PromptServer
+
+log = logging.getLogger("[RunOnRunpod]")
 
 from .s3_utils import get_s3_client, upload_file
 
@@ -105,6 +108,7 @@ async def verify_settings(request):
         except Exception as e:
             results["errors"].append(f"S3 storage error: {e}")
 
+    log.info(f"Verify result: runpod_api={results['runpod_api']}, s3_storage={results['s3_storage']}, errors={results['errors']}")
     return web.json_response(results)
 
 
