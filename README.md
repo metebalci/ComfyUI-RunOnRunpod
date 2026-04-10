@@ -34,10 +34,7 @@ Create a RunPod network volume and set up the following directory structure:
 /outputs/        # Output files (written by the worker)
 ```
 
-Upload models to the network volume using one of:
-- RunPod's S3-compatible API with an S3 client (Cyberduck, WinSCP, S3 Browser, AWS CLI)
-- A temporary pod attached to the volume
-- RunPod's cloud sync feature
+Upload models to the network volume using AWS CLI or any S3-compatible client with RunPod's S3 API credentials.
 
 ### 2. Prepare the worker
 
