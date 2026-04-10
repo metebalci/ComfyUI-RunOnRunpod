@@ -6,7 +6,6 @@ license = {file = "LICENSE"}
 requires-python = ">=3.10"
 dependencies = [
     "boto3",
-    "aiohttp",
 ]
 classifiers = [
     "Environment :: GPU :: NVIDIA CUDA",
