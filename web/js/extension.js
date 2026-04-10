@@ -13,6 +13,8 @@ const STATE = {
 let currentState = STATE.IDLE;
 let currentJobId = null;
 let pollInterval = null;
+let _verifyCallback = null;
+const onSettingChanged = () => { if (_verifyCallback) _verifyCallback(); };
 
 app.registerExtension({
     name: "RunOnRunpod",
@@ -23,30 +25,35 @@ app.registerExtension({
             name: "Network Volume ID",
             type: "text",
             defaultValue: "",
+            onChange: onSettingChanged,
         },
         {
             id: "Run on Runpod.Runpod.endpointId",
             name: "Endpoint ID",
             type: "text",
             defaultValue: "",
+            onChange: onSettingChanged,
         },
         {
             id: "Run on Runpod.Runpod.s3SecretKey",
             name: "S3 Secret Key",
             type: "text",
             defaultValue: "",
+            onChange: onSettingChanged,
         },
         {
             id: "Run on Runpod.Runpod.s3AccessKey",
             name: "S3 Access Key",
             type: "text",
             defaultValue: "",
+            onChange: onSettingChanged,
         },
         {
             id: "Run on Runpod.Runpod.apiKey",
             name: "API Key",
             type: "text",
             defaultValue: "",
+            onChange: onSettingChanged,
         },
     ],
 
@@ -179,17 +186,9 @@ app.registerExtension({
             }
         }
 
-        // Verify on startup
+        // Verify on startup and when settings change
+        _verifyCallback = verifySettings;
         verifySettings();
-
-        // Re-verify when settings dialog closes (detect dialog removal)
-        const settingsObserver = new MutationObserver(() => {
-            const dialog = document.querySelector(".p-dialog");
-            if (!dialog) {
-                verifySettings();
-            }
-        });
-        settingsObserver.observe(document.body, { childList: true, subtree: true });
 
         // --- State management ---
         function setState(state) {
