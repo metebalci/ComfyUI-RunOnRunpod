@@ -17,6 +17,9 @@ WORKDIR /comfyui
 RUN pip install -r requirements.txt
 RUN pip install torch==2.11.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
 
+# Install Flash Attention 2 (compiled from source for CUDA 13.0)
+RUN pip install flash-attn --no-build-isolation
+
 # Install Flash Attention 3 (prebuilt wheel for CUDA 13.0 + PyTorch 2.11)
 RUN pip install https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.30-a3a563f/flash_attn_3-3.0.0%2B20260330.cu130torch2110cxx11abitrue.98024f-cp39-abi3-linux_x86_64.whl
 
