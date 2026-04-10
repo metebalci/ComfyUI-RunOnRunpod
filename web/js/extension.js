@@ -170,11 +170,12 @@ app.registerExtension({
         }
 
         // --- Notification ---
-        function showNotification(files) {
+        function showNotification(message, isError = false) {
             document.querySelectorAll(".runpod-notification").forEach(el => el.remove());
 
             const div = document.createElement("div");
             div.className = "runpod-notification";
+            if (isError) div.style.borderLeft = "4px solid #d9534f";
 
             const closeBtn = document.createElement("span");
             closeBtn.className = "close-btn";
@@ -183,12 +184,12 @@ app.registerExtension({
             div.appendChild(closeBtn);
 
             const title = document.createElement("div");
-            title.textContent = `Job completed \u2014 ${files.length} output(s) on network volume`;
+            title.textContent = message;
             title.style.fontWeight = "bold";
             div.appendChild(title);
 
             document.body.appendChild(div);
-            setTimeout(() => div.remove(), 10000);
+            setTimeout(() => div.remove(), isError ? 15000 : 10000);
         }
 
         // --- Polling ---
@@ -211,7 +212,7 @@ app.registerExtension({
                         const outputCount = data.output?.output_count || 0;
                         const outputFiles = data.output?.output_files || [];
                         if (outputCount > 0) {
-                            showNotification(outputFiles);
+                            showNotification(`Job completed \u2014 ${outputCount} output(s) on network volume`);
                         }
                     } else if (
                         data.status === "FAILED" ||
@@ -250,12 +251,12 @@ app.registerExtension({
                     });
                     const verifyData = await verifyRes.json();
                     if (!verifyData.runpod_api || !verifyData.s3_storage) {
-                        const errors = (verifyData.errors || []).join("\n");
-                        alert("RunOnRunpod settings error:\n" + errors);
+                        const errors = (verifyData.errors || []).join(", ");
+                        showNotification("Settings error: " + errors, true);
                         return;
                     }
                 } catch (err) {
-                    alert("RunOnRunpod: Failed to verify settings");
+                    showNotification("Failed to verify settings", true);
                     return;
                 }
 
@@ -271,7 +272,7 @@ app.registerExtension({
                     const data = await res.json();
 
                     if (data.error) {
-                        alert(`RunOnRunpod: ${data.error}`);
+                        showNotification(data.error, true);
                         setState(STATE.IDLE);
                         return;
                     }
@@ -281,7 +282,7 @@ app.registerExtension({
                     startPolling(currentJobId);
                 } catch (err) {
                     console.error("[RunOnRunpod] Submit error:", err);
-                    alert("RunOnRunpod: Failed to submit job");
+                    showNotification("Failed to submit job", true);
                     setState(STATE.IDLE);
                 }
             } else if (currentState === STATE.QUEUED || currentState === STATE.RUNNING) {
