@@ -28,54 +28,55 @@ app.registerExtension({
 
     async setup() {
         // --- Register settings ---
+        const category = ["RunOnRunpod", "Settings"];
         app.ui.settings.addSetting({
             id: "RunOnRunpod.apiKey",
             name: "RunPod API Key",
             type: "text",
             defaultValue: "",
-            category: ["RunOnRunpod", "RunPod"],
+            category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.endpointId",
-            name: "Endpoint ID",
+            name: "RunPod Endpoint ID",
             type: "text",
             defaultValue: "",
-            category: ["RunOnRunpod", "RunPod"],
+            category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3Provider",
             name: "S3 Provider (aws / r2 / gcs / runpod / custom)",
             type: "text",
             defaultValue: "aws",
-            category: ["RunOnRunpod", "S3 Storage"],
+            category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3Endpoint",
             name: "S3 Endpoint",
             type: "text",
             defaultValue: "",
-            category: ["RunOnRunpod", "S3 Storage"],
+            category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3AccessKey",
             name: "S3 Access Key",
             type: "text",
             defaultValue: "",
-            category: ["RunOnRunpod", "S3 Storage"],
+            category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3SecretKey",
             name: "S3 Secret Key",
             type: "text",
             defaultValue: "",
-            category: ["RunOnRunpod", "S3 Storage"],
+            category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3Bucket",
             name: "S3 Bucket",
             type: "text",
             defaultValue: "",
-            category: ["RunOnRunpod", "S3 Storage"],
+            category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.maxOutputUrls",
@@ -83,7 +84,7 @@ app.registerExtension({
             type: "number",
             defaultValue: 5,
             attrs: { min: 1, max: 50, step: 1 },
-            category: ["RunOnRunpod", "S3 Storage"],
+            category,
         });
 
         // --- Inject CSS ---
