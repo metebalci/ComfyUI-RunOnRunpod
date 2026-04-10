@@ -19,6 +19,11 @@ RUN pip install flash-attn --no-build-isolation
 # Install RunPod SDK and handler dependencies (stable layer)
 RUN pip install runpod requests
 
+# Copy handler and start script (stable layer)
+COPY handler.py /handler.py
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
 # Install ComfyUI at a specific tag (changes with new releases)
 ARG COMFYUI_TAG=latest
 RUN git clone --branch "${COMFYUI_TAG}" --depth 1 https://github.com/comfyanonymous/ComfyUI.git /comfyui
@@ -37,10 +42,5 @@ RUN while IFS= read -r repo || [ -n "$repo" ]; do \
             pip install -r "/comfyui/custom_nodes/$name/requirements.txt"; \
         fi; \
     done < /tmp/custom_nodes.txt
-
-# Copy handler and start script (changes with code updates)
-COPY handler.py /handler.py
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
 
 CMD ["/start.sh"]
