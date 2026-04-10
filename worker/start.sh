@@ -9,7 +9,7 @@ fi
 
 # Start ComfyUI in background
 echo "[RunOnRunpod] Starting ComfyUI..."
-python3 /comfyui/main.py --listen 127.0.0.1 --port 8188 --disable-auto-launch --use-flash-attention &
+python3 /comfyui/main.py --listen 127.0.0.1 --port 8188 --disable-auto-launch &
 
 # Wait for ComfyUI to be ready
 echo "[RunOnRunpod] Waiting for ComfyUI to be ready..."
