@@ -23,69 +23,79 @@ let currentJobId = null;
 let outputGetUrls = {};
 let pollInterval = null;
 
+const SETTINGS_CATEGORY = ["RunOnRunpod", "Settings"];
+
 app.registerExtension({
     name: "RunOnRunpod",
 
-    async setup() {
-        // --- Register settings ---
-        const category = ["RunOnRunpod", "Settings"];
-        app.ui.settings.addSetting({
+    settings: [
+        {
             id: "RunOnRunpod.apiKey",
             name: "RunPod API Key",
-            type: "string",
+            type: "text",
             defaultValue: "",
-            category,
-        });
-        app.ui.settings.addSetting({
+            category: SETTINGS_CATEGORY,
+        },
+        {
             id: "RunOnRunpod.endpointId",
             name: "RunPod Endpoint ID",
-            type: "string",
+            type: "text",
             defaultValue: "",
-            category,
-        });
-        app.ui.settings.addSetting({
+            category: SETTINGS_CATEGORY,
+        },
+        {
             id: "RunOnRunpod.s3Provider",
-            name: "S3 Provider (aws / r2 / gcs / runpod / custom)",
-            type: "string",
+            name: "S3 Provider",
+            type: "combo",
             defaultValue: "aws",
-            category,
-        });
-        app.ui.settings.addSetting({
+            options: [
+                { text: "AWS S3", value: "aws" },
+                { text: "Cloudflare R2", value: "r2" },
+                { text: "Google Cloud Storage", value: "gcs" },
+                { text: "RunPod", value: "runpod" },
+                { text: "Custom", value: "custom" },
+            ],
+            category: SETTINGS_CATEGORY,
+        },
+        {
             id: "RunOnRunpod.s3Endpoint",
             name: "S3 Endpoint",
-            type: "string",
+            type: "text",
             defaultValue: "",
-            category,
-        });
-        app.ui.settings.addSetting({
+            category: SETTINGS_CATEGORY,
+        },
+        {
             id: "RunOnRunpod.s3AccessKey",
             name: "S3 Access Key",
-            type: "string",
+            type: "text",
             defaultValue: "",
-            category,
-        });
-        app.ui.settings.addSetting({
+            category: SETTINGS_CATEGORY,
+        },
+        {
             id: "RunOnRunpod.s3SecretKey",
             name: "S3 Secret Key",
-            type: "string",
+            type: "text",
             defaultValue: "",
-            category,
-        });
-        app.ui.settings.addSetting({
+            category: SETTINGS_CATEGORY,
+        },
+        {
             id: "RunOnRunpod.s3Bucket",
             name: "S3 Bucket",
-            type: "string",
+            type: "text",
             defaultValue: "",
-            category,
-        });
-        app.ui.settings.addSetting({
+            category: SETTINGS_CATEGORY,
+        },
+        {
             id: "RunOnRunpod.maxOutputUrls",
             name: "Max Output URLs per Job",
             type: "number",
             defaultValue: 5,
             attrs: { min: 1, max: 50, step: 1 },
-            category,
-        });
+            category: SETTINGS_CATEGORY,
+        },
+    ],
+
+    async setup() {
 
         // --- Inject CSS ---
         const style = document.createElement("style");
