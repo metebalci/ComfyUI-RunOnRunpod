@@ -181,6 +181,7 @@ async def submit_job(request):
 
     job_id = result["id"]
     _active_job = {"job_id": job_id}
+    log.info(f"Job submitted: {job_id}, polling every 2s")
 
     return web.json_response({
         "job_id": job_id,
@@ -204,8 +205,11 @@ async def get_status(request):
         ) as resp:
             result = await resp.json()
 
+    status = result.get("status", "UNKNOWN")
+    log.info(f"Job {job_id}: {status}")
+
     return web.json_response({
-        "status": result.get("status", "UNKNOWN"),
+        "status": status,
         "output": result.get("output"),
         "error": result.get("error"),
     })
