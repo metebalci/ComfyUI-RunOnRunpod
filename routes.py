@@ -199,12 +199,27 @@ async def get_status(request):
     api_key = settings.get("apiKey", "")
     endpoint_id = settings.get("endpointId", "")
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
-            headers={"Authorization": f"Bearer {api_key}"},
-        ) as resp:
-            result = await resp.json()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
+                headers={"Authorization": f"Bearer {api_key}"},
+            ) as resp:
+                if resp.status == 404:
+                    log.error(f"Job {job_id}: not found (404)")
+                    return web.json_response({
+                        "status": "UNKNOWN",
+                        "output": None,
+                        "error": "Job not found",
+                    })
+                result = await resp.json()
+    except Exception as e:
+        log.error(f"Job {job_id}: status check failed: {e}")
+        return web.json_response({
+            "status": "UNKNOWN",
+            "output": None,
+            "error": str(e),
+        })
 
     status = result.get("status", "UNKNOWN")
     log.info(f"Job {job_id}: {status}")

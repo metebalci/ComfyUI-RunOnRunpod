@@ -170,16 +170,17 @@ app.registerExtension({
                     } else if (
                         data.status === "FAILED" ||
                         data.status === "CANCELLED" ||
-                        data.status === "TIMED_OUT"
+                        data.status === "TIMED_OUT" ||
+                        data.status === "UNKNOWN"
                     ) {
                         stopPolling();
                         setState(STATE.FAILED);
-                        if (data.error) {
-                            console.error("[RunOnRunpod] Job error:", data.error);
-                        }
+                        console.error(`[RunOnRunpod] Job ${data.status}:`, data.error || "");
                     }
                 } catch (err) {
                     console.error("[RunOnRunpod] Polling error:", err);
+                    stopPolling();
+                    setState(STATE.FAILED);
                 }
             }, 2000);
         }
