@@ -13,12 +13,6 @@ const STATE = {
 let currentState = STATE.IDLE;
 let currentJobId = null;
 let pollInterval = null;
-let _verifyCallback = null;
-let _verifyTimeout = null;
-const onSettingChanged = () => {
-    if (_verifyTimeout) clearTimeout(_verifyTimeout);
-    _verifyTimeout = setTimeout(() => { if (_verifyCallback) _verifyCallback(); }, 2000);
-};
 
 app.registerExtension({
     name: "RunOnRunpod",
@@ -29,35 +23,30 @@ app.registerExtension({
             name: "Network Volume ID",
             type: "text",
             defaultValue: "",
-            onChange: onSettingChanged,
         },
         {
             id: "Run on Runpod.Runpod.endpointId",
             name: "Endpoint ID",
             type: "text",
             defaultValue: "",
-            onChange: onSettingChanged,
         },
         {
             id: "Run on Runpod.Runpod.s3SecretKey",
             name: "S3 Secret Key",
             type: "text",
             defaultValue: "",
-            onChange: onSettingChanged,
         },
         {
             id: "Run on Runpod.Runpod.s3AccessKey",
             name: "S3 Access Key",
             type: "text",
             defaultValue: "",
-            onChange: onSettingChanged,
         },
         {
             id: "Run on Runpod.Runpod.apiKey",
             name: "API Key",
             type: "text",
             defaultValue: "",
-            onChange: onSettingChanged,
         },
     ],
 
@@ -122,13 +111,6 @@ app.registerExtension({
                 0%, 100% { opacity: 1; }
                 50% { opacity: 0.6; }
             }
-            .runpod-btn.settings-error {
-                animation: runpod-blink-red 1s steps(1) infinite;
-            }
-            @keyframes runpod-blink-red {
-                0%, 50% { background: #d9534f; }
-                50.1%, 100% { background: #4a9a5c; }
-            }
             .runpod-notification {
                 position: fixed;
                 bottom: 20px;
@@ -142,13 +124,6 @@ app.registerExtension({
                 font-size: 13px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.3);
             }
-            .runpod-notification a {
-                color: #6cf;
-                text-decoration: underline;
-                display: block;
-                margin-top: 4px;
-                word-break: break-all;
-            }
             .runpod-notification .close-btn {
                 position: absolute;
                 top: 4px;
@@ -160,7 +135,7 @@ app.registerExtension({
         `;
         document.head.appendChild(style);
 
-        // --- Create button elements ---
+        // --- Create button ---
         const wrapper = document.createElement("div");
         wrapper.className = "runpod-btn-wrapper";
 
@@ -171,55 +146,12 @@ app.registerExtension({
 
         wrapper.appendChild(btn);
 
-        // --- Verify settings ---
-        let settingsOk = false;
-
-        async function verifySettings() {
-            try {
-                const res = await api.fetchApi("/RunOnRunpod/verify", {
-                    method: "POST",
-                    body: JSON.stringify({ settings: getSettings() }),
-                });
-                const data = await res.json();
-                if (data.runpod_api && data.s3_storage) {
-                    settingsOk = true;
-                    if (currentState === STATE.IDLE) {
-                        btn.classList.remove("settings-error");
-                        btn.title = "Run on RunPod";
-                    }
-                } else {
-                    settingsOk = false;
-                    if (currentState === STATE.IDLE) {
-                        btn.classList.add("settings-error");
-                        btn.title = (data.errors || []).join("\n") || "Settings error";
-                    }
-                }
-            } catch (err) {
-                settingsOk = false;
-                if (currentState === STATE.IDLE) {
-                    btn.classList.add("settings-error");
-                    btn.title = "Settings verification failed";
-                }
-            }
-        }
-
-        // Verify on startup and when settings change
-        _verifyCallback = verifySettings;
-        verifySettings();
-
         // --- State management ---
         function setState(state) {
             currentState = state;
             btn.classList.remove("queued", "running", "completed", "failed");
 
             switch (state) {
-                case STATE.IDLE:
-                    if (!settingsOk) {
-                        btn.classList.add("settings-error");
-                    } else {
-                        btn.classList.remove("settings-error");
-                    }
-                    break;
                 case STATE.QUEUED:
                     btn.classList.add("queued");
                     break;
@@ -246,12 +178,12 @@ app.registerExtension({
 
             const closeBtn = document.createElement("span");
             closeBtn.className = "close-btn";
-            closeBtn.textContent = "✕";
+            closeBtn.textContent = "\u2715";
             closeBtn.onclick = () => div.remove();
             div.appendChild(closeBtn);
 
             const title = document.createElement("div");
-            title.textContent = `Job completed — ${files.length} output(s) on network volume`;
+            title.textContent = `Job completed \u2014 ${files.length} output(s) on network volume`;
             title.style.fontWeight = "bold";
             div.appendChild(title);
 
@@ -276,7 +208,6 @@ app.registerExtension({
                         stopPolling();
                         setState(STATE.COMPLETED);
 
-                        // Show output file count
                         const outputCount = data.output?.output_count || 0;
                         const outputFiles = data.output?.output_files || [];
                         if (outputCount > 0) {
@@ -311,11 +242,23 @@ app.registerExtension({
         // --- Click handler: submit or cancel ---
         btn.addEventListener("click", async () => {
             if (currentState === STATE.IDLE) {
-                // Re-verify if settings are bad
-                if (!settingsOk) {
-                    await verifySettings();
-                    if (!settingsOk) return;
+                // Verify settings first
+                try {
+                    const verifyRes = await api.fetchApi("/RunOnRunpod/verify", {
+                        method: "POST",
+                        body: JSON.stringify({ settings: getSettings() }),
+                    });
+                    const verifyData = await verifyRes.json();
+                    if (!verifyData.runpod_api || !verifyData.s3_storage) {
+                        const errors = (verifyData.errors || []).join("\n");
+                        alert("RunOnRunpod settings error:\n" + errors);
+                        return;
+                    }
+                } catch (err) {
+                    alert("RunOnRunpod: Failed to verify settings");
+                    return;
                 }
+
                 // Submit
                 try {
                     const prompt = await app.graphToPrompt();
