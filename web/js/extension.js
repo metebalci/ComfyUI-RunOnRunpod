@@ -32,49 +32,49 @@ app.registerExtension({
         app.ui.settings.addSetting({
             id: "RunOnRunpod.apiKey",
             name: "RunPod API Key",
-            type: "text",
+            type: "string",
             defaultValue: "",
             category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.endpointId",
             name: "RunPod Endpoint ID",
-            type: "text",
+            type: "string",
             defaultValue: "",
             category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3Provider",
             name: "S3 Provider (aws / r2 / gcs / runpod / custom)",
-            type: "text",
+            type: "string",
             defaultValue: "aws",
             category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3Endpoint",
             name: "S3 Endpoint",
-            type: "text",
+            type: "string",
             defaultValue: "",
             category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3AccessKey",
             name: "S3 Access Key",
-            type: "text",
+            type: "string",
             defaultValue: "",
             category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3SecretKey",
             name: "S3 Secret Key",
-            type: "text",
+            type: "string",
             defaultValue: "",
             category,
         });
         app.ui.settings.addSetting({
             id: "RunOnRunpod.s3Bucket",
             name: "S3 Bucket",
-            type: "text",
+            type: "string",
             defaultValue: "",
             category,
         });
