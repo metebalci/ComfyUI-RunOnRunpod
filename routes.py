@@ -1,4 +1,3 @@
-import logging
 import os
 import uuid
 
@@ -6,9 +5,9 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-log = logging.getLogger("[RunOnRunpod]")
-
 from .s3_utils import get_s3_client, upload_file
+
+_PREFIX = "[RunOnRunpod]"
 
 routes = PromptServer.instance.routes
 
@@ -108,7 +107,7 @@ async def verify_settings(request):
             results["errors"].append(f"S3 storage error: {e}")
 
     if results["errors"]:
-        log.error(f"Verify failed: {results['errors']}")
+        print(_PREFIX,f"Verify failed: {results['errors']}")
     return web.json_response(results)
 
 
@@ -124,7 +123,7 @@ async def submit_job(request):
     endpoint_id = settings.get("endpointId", "")
 
     if not api_key or not endpoint_id:
-        log.error("RunPod API Key and Endpoint ID are required")
+        print(_PREFIX,"RunPod API Key and Endpoint ID are required")
         return web.json_response(
             {"error": "RunPod API Key and Endpoint ID are required"}, status=400
         )
@@ -135,7 +134,7 @@ async def submit_job(request):
     s3_endpoint = settings.get("s3Endpoint", "")
 
     if not bucket or not s3_access or not s3_secret or not s3_endpoint:
-        log.error("S3 credentials, endpoint URL, and bucket name are required")
+        print(_PREFIX,"S3 credentials, endpoint URL, and bucket name are required")
         return web.json_response(
             {"error": "S3 credentials, endpoint URL, and bucket name are required"}, status=400
         )
@@ -148,12 +147,12 @@ async def submit_job(request):
                 headers={"Authorization": f"Bearer {api_key}"},
             ) as resp:
                 if resp.status != 200:
-                    log.error(f"RunPod API health check failed: {resp.status}")
+                    print(_PREFIX,f"RunPod API health check failed: {resp.status}")
                     return web.json_response(
                         {"error": f"RunPod API health check failed (status {resp.status})"}, status=400
                     )
     except Exception as e:
-        log.error(f"RunPod API health check error: {e}")
+        print(_PREFIX,f"RunPod API health check error: {e}")
         return web.json_response(
             {"error": f"RunPod API error: {e}"}, status=400
         )
@@ -163,7 +162,7 @@ async def submit_job(request):
         client = _make_s3_client(settings)
         client.head_bucket(Bucket=bucket)
     except Exception as e:
-        log.error(f"S3 storage validation failed: {e}")
+        print(_PREFIX,f"S3 storage validation failed: {e}")
         return web.json_response(
             {"error": f"S3 storage error: {e}"}, status=400
         )
@@ -211,7 +210,7 @@ async def submit_job(request):
 
     job_id = result["id"]
     _active_job = {"job_id": job_id}
-    log.info(f"Job submitted: {job_id}, polling every 2s")
+    print(_PREFIX,f"Job submitted: {job_id}, polling every 2s")
 
     return web.json_response({
         "job_id": job_id,
@@ -235,7 +234,7 @@ async def get_status(request):
                 headers={"Authorization": f"Bearer {api_key}"},
             ) as resp:
                 if resp.status == 404:
-                    log.error(f"Job {job_id}: not found (404)")
+                    print(_PREFIX,f"Job {job_id}: not found (404)")
                     return web.json_response({
                         "status": "UNKNOWN",
                         "output": None,
@@ -243,7 +242,7 @@ async def get_status(request):
                     })
                 result = await resp.json()
     except Exception as e:
-        log.error(f"Job {job_id}: status check failed: {e}")
+        print(_PREFIX,f"Job {job_id}: status check failed: {e}")
         return web.json_response({
             "status": "UNKNOWN",
             "output": None,
@@ -255,11 +254,11 @@ async def get_status(request):
     output = result.get("output")
 
     if status == "FAILED":
-        log.error(f"Job {job_id} FAILED: {error or output}")
+        print(_PREFIX,f"Job {job_id} FAILED: {error or output}")
     elif status in ("CANCELLED", "TIMED_OUT"):
-        log.error(f"Job {job_id}: {status}")
+        print(_PREFIX,f"Job {job_id}: {status}")
     else:
-        log.info(f"Job {job_id}: {status}")
+        print(_PREFIX,f"Job {job_id}: {status}")
 
     return web.json_response({
         "status": status,
