@@ -382,16 +382,22 @@ app.registerExtension({
 
         // --- Insert button into menu ---
         const insertButton = () => {
-            const menu = document.querySelector(".comfyui-menu");
-            if (menu) {
-                menu.appendChild(wrapper);
+            // New menu
+            const newMenu = document.querySelector(".comfyui-menu");
+            if (newMenu) {
+                newMenu.appendChild(wrapper);
+                return true;
+            }
+            // Legacy menu
+            const legacyMenu = document.querySelector(".comfy-menu");
+            if (legacyMenu) {
+                legacyMenu.appendChild(wrapper);
                 return true;
             }
             return false;
         };
 
         if (!insertButton()) {
-            // Retry after a short delay if menu isn't ready yet
             const observer = new MutationObserver(() => {
                 if (insertButton()) {
                     observer.disconnect();
