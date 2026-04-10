@@ -38,6 +38,8 @@ Upload models to the network volume using AWS CLI or any S3-compatible client wi
 
 ### 2. Prepare the worker
 
+ComfyUI and custom nodes are bundled into the Docker image to minimize cold start times on RunPod Serverless. Without bundling, each cold start would need to install dependencies, adding minutes of delay.
+
 A pre-built image is available at `docker.io/metebalci/comfyui-runonrunpod:latest` with the custom nodes listed in `worker/custom_nodes.txt`.
 
 To build your own image with different custom nodes:
