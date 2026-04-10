@@ -100,33 +100,13 @@ app.registerExtension({
                 0%, 100% { opacity: 1; }
                 50% { opacity: 0.6; }
             }
-            .runpod-verify {
-                width: 20px;
-                height: 20px;
-                border-radius: 50%;
-                border: none;
-                cursor: pointer;
-                font-size: 11px;
-                line-height: 20px;
-                text-align: center;
-                background: #888;
-                color: #fff;
-                transition: background 0.3s;
-                padding: 0;
-                flex-shrink: 0;
-            }
-            .runpod-verify:hover {
-                opacity: 0.85;
-            }
-            .runpod-verify.ok {
-                background: #4a9a5c;
-            }
-            .runpod-verify.fail {
+            .runpod-btn.settings-error {
                 background: #d9534f;
+                animation: runpod-blink-red 1.5s ease-in-out infinite;
             }
-            .runpod-verify.checking {
-                background: #888;
-                animation: runpod-pulse 1s ease-in-out infinite;
+            @keyframes runpod-blink-red {
+                0%, 100% { background: #d9534f; }
+                50% { background: #8b2020; }
             }
             .runpod-notification {
                 position: fixed;
@@ -163,41 +143,41 @@ app.registerExtension({
         const wrapper = document.createElement("div");
         wrapper.className = "runpod-btn-wrapper";
 
-        const verifyBtn = document.createElement("button");
-        verifyBtn.textContent = "✓";
-        verifyBtn.className = "runpod-verify";
-        verifyBtn.title = "Verifying settings...";
-
         const btn = document.createElement("button");
         btn.textContent = "Run on RunPod";
         btn.className = "runpod-btn";
         btn.title = "Run on RunPod";
 
-        wrapper.appendChild(verifyBtn);
         wrapper.appendChild(btn);
 
         // --- Verify settings ---
+        let settingsOk = false;
+
         async function verifySettings() {
-            verifyBtn.className = "runpod-verify checking";
-            verifyBtn.title = "Verifying settings...";
             try {
                 const res = await api.fetchApi("/RunOnRunpod/verify");
                 const data = await res.json();
                 if (data.runpod_api && data.s3_storage) {
-                    verifyBtn.className = "runpod-verify ok";
-                    verifyBtn.title = "Settings OK";
+                    settingsOk = true;
+                    if (currentState === STATE.IDLE) {
+                        btn.classList.remove("settings-error");
+                        btn.title = "Run on RunPod";
+                    }
                 } else {
-                    verifyBtn.className = "runpod-verify fail";
-                    verifyBtn.title = (data.errors || []).join("\n") || "Verification failed";
+                    settingsOk = false;
+                    if (currentState === STATE.IDLE) {
+                        btn.classList.add("settings-error");
+                        btn.title = (data.errors || []).join("\n") || "Settings error";
+                    }
                 }
             } catch (err) {
-                verifyBtn.className = "runpod-verify fail";
-                verifyBtn.title = "Verification error";
+                settingsOk = false;
+                if (currentState === STATE.IDLE) {
+                    btn.classList.add("settings-error");
+                    btn.title = "Settings verification failed";
+                }
             }
         }
-
-        // Click to re-verify
-        verifyBtn.addEventListener("click", verifySettings);
 
         // Verify on startup
         verifySettings();
@@ -210,7 +190,13 @@ app.registerExtension({
             switch (state) {
                 case STATE.IDLE:
                     btn.textContent = "Run on RunPod";
-                    btn.title = "Run on RunPod";
+                    if (!settingsOk) {
+                        btn.classList.add("settings-error");
+                        btn.title = "Settings error — click to retry or check settings";
+                    } else {
+                        btn.classList.remove("settings-error");
+                        btn.title = "Run on RunPod";
+                    }
                     break;
                 case STATE.QUEUED:
                     btn.textContent = "Queued...";
@@ -308,6 +294,11 @@ app.registerExtension({
         // --- Click handler: submit or cancel ---
         btn.addEventListener("click", async () => {
             if (currentState === STATE.IDLE) {
+                // Re-verify if settings are bad
+                if (!settingsOk) {
+                    await verifySettings();
+                    if (!settingsOk) return;
+                }
                 // Submit
                 try {
                     const prompt = await app.graphToPrompt();
