@@ -27,13 +27,15 @@ RUNPOD_S3_ENDPOINT = "https://s3.runpod.io"
 
 def _get_settings() -> dict:
     """Read RunOnRunpod settings from ComfyUI's user settings file."""
-    user_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "..",
-        "user",
-        "default",
-    )
-    settings_path = os.path.join(user_dir, "comfy.settings.json")
+    try:
+        import folder_paths
+        comfy_root = folder_paths.base_path
+    except (ImportError, AttributeError):
+        comfy_root = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "..",
+        )
+    settings_path = os.path.join(comfy_root, "user", "default", "comfy.settings.json")
     if not os.path.exists(settings_path):
         return {}
     with open(settings_path, "r") as f:
