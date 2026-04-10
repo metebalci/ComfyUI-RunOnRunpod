@@ -69,16 +69,14 @@ Restart ComfyUI.
 
 ### 4. Configure
 
-Open ComfyUI Settings and find the **RunOnRunpod** section:
+Open ComfyUI Settings and find the **Run on Runpod** section:
 
-**RunPod:**
-- API Key
-- Endpoint ID
-
-**Storage:**
-- S3 Access Key (from RunPod S3 API keys)
-- S3 Secret Key
-- Network Volume ID
+- API Key — RunPod API key
+- S3 Access Key — from RunPod S3 API keys
+- S3 Secret Key — from RunPod S3 API keys
+- Endpoint ID — your RunPod Serverless endpoint ID
+- Bucket Name — your network volume ID
+- S3 Endpoint URL — RunPod S3 endpoint (region-specific, shown on RunPod dashboard)
 
 ## Usage
 
