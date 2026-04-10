@@ -111,28 +111,6 @@ app.registerExtension({
                 0%, 100% { opacity: 1; }
                 50% { opacity: 0.6; }
             }
-            .runpod-notification {
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                background: #333;
-                color: #fff;
-                padding: 16px 24px;
-                border-radius: 8px;
-                max-width: 500px;
-                z-index: 10000;
-                font-size: 14px;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            }
-            .runpod-notification .close-btn {
-                position: absolute;
-                top: 4px;
-                right: 8px;
-                cursor: pointer;
-                font-size: 16px;
-                color: #aaa;
-            }
         `;
         document.head.appendChild(style);
 
@@ -170,29 +148,6 @@ app.registerExtension({
             }
         }
 
-        // --- Notification ---
-        function showNotification(message, isError = false) {
-            document.querySelectorAll(".runpod-notification").forEach(el => el.remove());
-
-            const div = document.createElement("div");
-            div.className = "runpod-notification";
-            if (isError) div.style.borderLeft = "4px solid #d9534f";
-
-            const closeBtn = document.createElement("span");
-            closeBtn.className = "close-btn";
-            closeBtn.textContent = "\u2715";
-            closeBtn.onclick = () => div.remove();
-            div.appendChild(closeBtn);
-
-            const title = document.createElement("div");
-            title.textContent = message;
-            title.style.fontWeight = "bold";
-            div.appendChild(title);
-
-            document.body.appendChild(div);
-            setTimeout(() => div.remove(), isError ? 15000 : 10000);
-        }
-
         // --- Polling ---
         function startPolling(jobId) {
             setState(STATE.QUEUED);
@@ -211,10 +166,7 @@ app.registerExtension({
                         setState(STATE.COMPLETED);
 
                         const outputCount = data.output?.output_count || 0;
-                        const outputFiles = data.output?.output_files || [];
-                        if (outputCount > 0) {
-                            showNotification(`Job completed \u2014 ${outputCount} output(s) on network volume`);
-                        }
+                        console.log(`[RunOnRunpod] Job completed — ${outputCount} output(s) on network volume`);
                     } else if (
                         data.status === "FAILED" ||
                         data.status === "CANCELLED" ||
@@ -253,7 +205,8 @@ app.registerExtension({
                 if (!s.s3SecretKey) missing.push("S3 Secret Key");
                 if (!s.volumeId) missing.push("Network Volume ID");
                 if (missing.length > 0) {
-                    showNotification("Missing settings: " + missing.join(", "), true);
+                    console.error("[RunOnRunpod] Missing settings:", missing.join(", "));
+                    setState(STATE.FAILED);
                     return;
                 }
 
@@ -271,8 +224,8 @@ app.registerExtension({
                     const data = await res.json();
 
                     if (data.error) {
-                        showNotification(data.error, true);
-                        setState(STATE.IDLE);
+                        console.error("[RunOnRunpod] Submit error:", data.error);
+                        setState(STATE.FAILED);
                         return;
                     }
 
@@ -281,8 +234,7 @@ app.registerExtension({
                     startPolling(currentJobId);
                 } catch (err) {
                     console.error("[RunOnRunpod] Submit error:", err);
-                    showNotification("Failed to submit job", true);
-                    setState(STATE.IDLE);
+                    setState(STATE.FAILED);
                 }
             } else if (currentState === STATE.QUEUED || currentState === STATE.RUNNING) {
                 // Cancel

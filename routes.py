@@ -125,6 +125,7 @@ async def submit_job(request):
     endpoint_id = settings.get("endpointId", "")
 
     if not api_key or not endpoint_id:
+        log.error("RunPod API Key and Endpoint ID are required")
         return web.json_response(
             {"error": "RunPod API Key and Endpoint ID are required"}, status=400
         )
