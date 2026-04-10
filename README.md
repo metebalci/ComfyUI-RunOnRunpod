@@ -8,39 +8,53 @@ A ComfyUI plugin that lets you run workflows on [RunPod Serverless](https://www.
 
 Installed in your local ComfyUI's `custom_nodes/` directory. Provides:
 
-- **Run on RunPod button** with status indicator (white → yellow → blue → green/red)
-- **Cancel button** to abort running jobs
-- **Settings panel** for RunPod API key, endpoint ID, and S3 storage configuration
-- **S3-based file I/O** — uploads input files, generates presigned URLs for outputs
+- **Run on RunPod button** with status indicator (green → yellow → blue → green/red)
+- Click the button to cancel a running job
+- **Settings panel** for RunPod and storage configuration
+- Uploads input files (images, video, audio) to the network volume before submitting
 
 ### Worker (RunPod Serverless)
 
 A Docker image that runs ComfyUI on RunPod. The worker:
 
-- Receives workflow JSON + presigned URLs via RunPod job input
-- Downloads input files, executes the workflow, uploads outputs
-- Requires **zero S3 configuration** — all file transfers use presigned URLs
-- Uses a RunPod **network volume** for models
+- Receives workflow JSON via RunPod job input
+- Reads input files and writes output files directly on the mounted network volume
+- Requires **zero configuration** — no S3 credentials or environment variables needed
+- Uses a RunPod **network volume** for models, inputs, and outputs
 
 ## Setup
 
-### 1. Prepare the worker
+### 1. Prepare the network volume
+
+Create a RunPod network volume and set up the following directory structure:
+
+```
+/models/         # ComfyUI models (checkpoints, loras, etc.)
+/inputs/         # Input files (uploaded by the plugin)
+/outputs/        # Output files (written by the worker)
+```
+
+Upload models to the network volume using one of:
+- RunPod's S3-compatible API with an S3 client (Cyberduck, WinSCP, S3 Browser, AWS CLI)
+- A temporary pod attached to the volume
+- RunPod's cloud sync feature
+
+### 2. Prepare the worker
 
 A pre-built image is available at `docker.io/metebalci/comfyui-runonrunpod:latest` with the custom nodes listed in `worker/custom_nodes.txt`.
 
 To build your own image with different custom nodes:
 
 1. Edit `worker/custom_nodes.txt` to list the custom nodes you need (one git URL per line)
-2. Build the Docker image:
+2. Build and push:
    ```bash
    cd worker
-   docker build -t comfyui-runonrunpod .
+   ./build-docker.sh
    ```
-3. Push to Docker Hub or another registry
 
-Then create a RunPod Serverless endpoint using the image, with a network volume attached for models.
+Create a RunPod Serverless endpoint using the image, with the network volume attached.
 
-### 2. Install the plugin
+### 3. Install the plugin
 
 Clone this repo into your ComfyUI custom nodes directory:
 
@@ -54,31 +68,18 @@ Restart ComfyUI.
 
 **Note:** This plugin requires the new menu (Settings -> "Use new menu" -> "Top"). The legacy menu is not supported.
 
-### 3. Configure
+### 4. Configure
 
 Open ComfyUI Settings and find the **RunOnRunpod** section:
 
 **RunPod:**
-- RunPod API Key
+- API Key
 - Endpoint ID
 
-**S3 Storage (for inputs/outputs):**
-- S3 Provider (AWS / Cloudflare R2 / Google Cloud Storage / RunPod / Custom)
-- S3 Endpoint (auto-populated based on provider)
-- S3 Access Key
+**Storage:**
+- S3 Access Key (from RunPod S3 API keys)
 - S3 Secret Key
-- S3 Bucket
-- Max Output URLs per Job (default: 5)
-
-### 4. Models
-
-Models must be on a RunPod **network volume** mounted to the worker. Upload models to the network volume via:
-
-- RunPod's S3-compatible API
-- A temporary pod attached to the volume
-- RunPod's cloud sync feature
-
-The worker automatically symlinks the network volume's `models/` directory to ComfyUI's model path.
+- Network Volume ID
 
 ## Usage
 
@@ -89,14 +90,18 @@ The worker automatically symlinks the network volume's `models/` directory to Co
    - **Blue (pulsing)** — running
    - **Green** — completed
    - **Red** — failed
-4. On completion, a notification appears with links to the output files in your S3 storage
-5. Click **X** next to the button to cancel a running job
+4. On completion, a notification appears with the output count. Outputs are saved to the `/outputs/` directory on the network volume.
+5. Click the button while a job is running to cancel it
 
 ## Storage Architecture
 
-- **Models** — RunPod network volume (fast local access on worker)
-- **Inputs/Outputs** — Any S3-compatible storage (AWS S3, Cloudflare R2, Google Cloud Storage, RunPod, or custom)
-- The plugin generates presigned URLs so the worker never needs S3 credentials
+Everything lives on the RunPod network volume:
+
+- **Models** — `/models/` (symlinked to ComfyUI's model path)
+- **Inputs** — `/inputs/` (plugin uploads via RunPod S3 API, worker reads as local files)
+- **Outputs** — `/outputs/` (worker writes as local files, accessible via RunPod S3 API)
+
+The worker has zero storage configuration — the network volume is mounted locally and it just reads/writes files.
 
 ## License
 
