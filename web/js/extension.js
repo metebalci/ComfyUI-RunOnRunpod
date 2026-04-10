@@ -114,54 +114,36 @@ app.registerExtension({
                 font-size: 14px;
                 font-weight: 300;
                 font-family: Inter, sans-serif;
-                background: var(--comfy-secondary-background, #333);
-                color: var(--comfy-base-foreground, #fff);
+                background: #4a9a5c;
+                color: #fff;
                 transition: background 0.3s;
                 height: 32px;
                 display: inline-flex;
                 align-items: center;
             }
-            .runpod-btn:disabled {
-                cursor: not-allowed;
-                opacity: 0.9;
+            .runpod-btn:hover {
+                opacity: 0.85;
             }
             .runpod-btn.queued {
                 background: #f0ad4e;
-                border-color: #eea236;
                 color: #000;
             }
             .runpod-btn.running {
                 background: #337ab7;
-                border-color: #2e6da4;
                 color: #fff;
                 animation: runpod-pulse 1.5s ease-in-out infinite;
             }
             .runpod-btn.completed {
                 background: #5cb85c;
-                border-color: #4cae4c;
                 color: #fff;
             }
             .runpod-btn.failed {
                 background: #d9534f;
-                border-color: #d43f3a;
                 color: #fff;
             }
             @keyframes runpod-pulse {
                 0%, 100% { opacity: 1; }
                 50% { opacity: 0.6; }
-            }
-            .runpod-cancel {
-                padding: 2px 6px;
-                border: 1px solid #999;
-                border-radius: 3px;
-                cursor: pointer;
-                font-size: 12px;
-                background: #eee;
-                color: #333;
-                display: none;
-            }
-            .runpod-cancel.visible {
-                display: inline-block;
             }
             .runpod-notification {
                 position: fixed;
@@ -201,13 +183,9 @@ app.registerExtension({
         const btn = document.createElement("button");
         btn.textContent = "Run on RunPod";
         btn.className = "runpod-btn";
-
-        const cancelBtn = document.createElement("button");
-        cancelBtn.textContent = "✕";
-        cancelBtn.className = "runpod-cancel";
+        btn.title = "Run on RunPod";
 
         wrapper.appendChild(btn);
-        wrapper.appendChild(cancelBtn);
 
         // --- State management ---
         function setState(state) {
@@ -216,34 +194,29 @@ app.registerExtension({
 
             switch (state) {
                 case STATE.IDLE:
-                    btn.disabled = false;
                     btn.textContent = "Run on RunPod";
-                    cancelBtn.classList.remove("visible");
+                    btn.title = "Run on RunPod";
                     break;
                 case STATE.QUEUED:
-                    btn.disabled = true;
                     btn.textContent = "Queued...";
+                    btn.title = "Click to cancel";
                     btn.classList.add("queued");
-                    cancelBtn.classList.add("visible");
                     break;
                 case STATE.RUNNING:
-                    btn.disabled = true;
                     btn.textContent = "Running...";
+                    btn.title = "Click to cancel";
                     btn.classList.add("running");
-                    cancelBtn.classList.add("visible");
                     break;
                 case STATE.COMPLETED:
-                    btn.disabled = true;
                     btn.textContent = "Completed";
+                    btn.title = "Run on RunPod";
                     btn.classList.add("completed");
-                    cancelBtn.classList.remove("visible");
                     setTimeout(() => setState(STATE.IDLE), 3000);
                     break;
                 case STATE.FAILED:
-                    btn.disabled = true;
                     btn.textContent = "Failed";
+                    btn.title = "Run on RunPod";
                     btn.classList.add("failed");
-                    cancelBtn.classList.remove("visible");
                     setTimeout(() => setState(STATE.IDLE), 3000);
                     break;
             }
@@ -333,49 +306,48 @@ app.registerExtension({
             sessionStorage.removeItem("runpod_job_id");
         }
 
-        // --- Submit ---
+        // --- Click handler: submit or cancel ---
         btn.addEventListener("click", async () => {
-            if (currentState !== STATE.IDLE) return;
+            if (currentState === STATE.IDLE) {
+                // Submit
+                try {
+                    const prompt = await app.graphToPrompt();
+                    setState(STATE.QUEUED);
 
-            try {
-                const prompt = await app.graphToPrompt();
-                setState(STATE.QUEUED);
+                    const res = await api.fetchApi("/RunOnRunpod/submit", {
+                        method: "POST",
+                        body: JSON.stringify({ workflow: prompt.output }),
+                    });
+                    const data = await res.json();
 
-                const res = await api.fetchApi("/RunOnRunpod/submit", {
-                    method: "POST",
-                    body: JSON.stringify({ workflow: prompt.output }),
-                });
-                const data = await res.json();
+                    if (data.error) {
+                        alert(`RunOnRunpod: ${data.error}`);
+                        setState(STATE.IDLE);
+                        return;
+                    }
 
-                if (data.error) {
-                    alert(`RunOnRunpod: ${data.error}`);
+                    currentJobId = data.job_id;
+                    outputGetUrls = data.output_get_urls || {};
+                    sessionStorage.setItem("runpod_job_id", currentJobId);
+                    startPolling(currentJobId);
+                } catch (err) {
+                    console.error("[RunOnRunpod] Submit error:", err);
+                    alert("RunOnRunpod: Failed to submit job");
                     setState(STATE.IDLE);
-                    return;
                 }
-
-                currentJobId = data.job_id;
-                outputGetUrls = data.output_get_urls || {};
-                sessionStorage.setItem("runpod_job_id", currentJobId);
-                startPolling(currentJobId);
-            } catch (err) {
-                console.error("[RunOnRunpod] Submit error:", err);
-                alert("RunOnRunpod: Failed to submit job");
+            } else if (currentState === STATE.QUEUED || currentState === STATE.RUNNING) {
+                // Cancel
+                if (!currentJobId) return;
+                try {
+                    await api.fetchApi(`/RunOnRunpod/cancel/${currentJobId}`, {
+                        method: "POST",
+                    });
+                } catch (err) {
+                    console.error("[RunOnRunpod] Cancel error:", err);
+                }
+                stopPolling();
                 setState(STATE.IDLE);
             }
-        });
-
-        // --- Cancel ---
-        cancelBtn.addEventListener("click", async () => {
-            if (!currentJobId) return;
-            try {
-                await api.fetchApi(`/RunOnRunpod/cancel/${currentJobId}`, {
-                    method: "POST",
-                });
-            } catch (err) {
-                console.error("[RunOnRunpod] Cancel error:", err);
-            }
-            stopPolling();
-            setState(STATE.IDLE);
         });
 
         // --- Resume polling on page reload ---
