@@ -48,7 +48,8 @@ To build your own image with different custom nodes:
 2. Build and push:
    ```bash
    cd worker
-   ./build-docker.sh
+   docker build -t your-dockerhub-username/comfyui-runonrunpod:latest .
+   docker push your-dockerhub-username/comfyui-runonrunpod:latest
    ```
 
 Create a RunPod Serverless endpoint using the image, with the network volume attached.
