@@ -14,7 +14,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install torch==2.11.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
 
 # Install Flash Attention 2 (stable layer — compiled from source for CUDA 13.0)
-RUN pip install packaging ninja
+RUN pip install packaging ninja wheel setuptools
 RUN pip install flash-attn --no-build-isolation
 
 # Install RunPod SDK and handler dependencies (stable layer)
