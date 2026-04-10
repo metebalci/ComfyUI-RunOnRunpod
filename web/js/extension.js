@@ -179,9 +179,17 @@ app.registerExtension({
             }
         }
 
-        // Verify on startup and periodically
+        // Verify on startup
         verifySettings();
-        setInterval(verifySettings, 30000);
+
+        // Re-verify when settings dialog closes (detect dialog removal)
+        const settingsObserver = new MutationObserver(() => {
+            const dialog = document.querySelector(".p-dialog");
+            if (!dialog) {
+                verifySettings();
+            }
+        });
+        settingsObserver.observe(document.body, { childList: true, subtree: true });
 
         // --- State management ---
         function setState(state) {
