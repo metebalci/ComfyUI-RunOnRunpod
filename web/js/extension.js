@@ -19,8 +19,14 @@ app.registerExtension({
 
     settings: [
         {
-            id: "Run on Runpod.Runpod.volumeId",
-            name: "Network Volume ID",
+            id: "Run on Runpod.Runpod.s3Endpoint",
+            name: "S3 Endpoint URL",
+            type: "text",
+            defaultValue: "",
+        },
+        {
+            id: "Run on Runpod.Runpod.bucketName",
+            name: "Bucket Name",
             type: "text",
             defaultValue: "",
         },
@@ -59,7 +65,8 @@ app.registerExtension({
                 endpointId: app.extensionManager.setting.get("Run on Runpod.Runpod.endpointId") || "",
                 s3AccessKey: app.extensionManager.setting.get("Run on Runpod.Runpod.s3AccessKey") || "",
                 s3SecretKey: app.extensionManager.setting.get("Run on Runpod.Runpod.s3SecretKey") || "",
-                volumeId: app.extensionManager.setting.get("Run on Runpod.Runpod.volumeId") || "",
+                s3Endpoint: app.extensionManager.setting.get("Run on Runpod.Runpod.s3Endpoint") || "",
+                bucketName: app.extensionManager.setting.get("Run on Runpod.Runpod.bucketName") || "",
             };
         }
 
@@ -204,7 +211,8 @@ app.registerExtension({
                 if (!s.endpointId) missing.push("Endpoint ID");
                 if (!s.s3AccessKey) missing.push("S3 Access Key");
                 if (!s.s3SecretKey) missing.push("S3 Secret Key");
-                if (!s.volumeId) missing.push("Network Volume ID");
+                if (!s.s3Endpoint) missing.push("S3 Endpoint URL");
+                if (!s.bucketName) missing.push("Bucket Name");
                 if (missing.length > 0) {
                     console.error("[RunOnRunpod] Missing settings:", missing.join(", "));
                     setState(STATE.FAILED);

@@ -23,8 +23,6 @@ INPUT_NODE_FIELDS = {
     "VHS_LoadVideo": "video",
 }
 
-# RunPod S3 endpoint
-RUNPOD_S3_ENDPOINT = "https://s3.runpod.io"
 
 
 def _get_input_directory() -> str:
@@ -54,9 +52,9 @@ def _scan_input_files(workflow: dict) -> dict:
 
 
 def _make_s3_client(settings: dict):
-    """Create S3 client from settings for RunPod network volume."""
+    """Create S3 client from settings."""
     return get_s3_client({
-        "s3_endpoint": RUNPOD_S3_ENDPOINT,
+        "s3_endpoint": settings.get("s3Endpoint"),
         "s3_access_key": settings.get("s3AccessKey"),
         "s3_secret_key": settings.get("s3SecretKey"),
     })
@@ -94,16 +92,17 @@ async def verify_settings(request):
         except Exception as e:
             results["errors"].append(f"RunPod API error: {e}")
 
-    # Check S3 credentials + volume
-    volume_id = settings.get("volumeId", "")
+    # Check S3 credentials + bucket
+    bucket = settings.get("bucketName", "")
     s3_access = settings.get("s3AccessKey", "")
     s3_secret = settings.get("s3SecretKey", "")
-    if not volume_id or not s3_access or not s3_secret:
-        results["errors"].append("S3 credentials and Volume ID are required")
+    s3_endpoint = settings.get("s3Endpoint", "")
+    if not bucket or not s3_access or not s3_secret or not s3_endpoint:
+        results["errors"].append("S3 credentials, endpoint URL, and bucket name are required")
     else:
         try:
             client = _make_s3_client(settings)
-            client.head_bucket(Bucket=volume_id)
+            client.head_bucket(Bucket=bucket)
             results["s3_storage"] = True
         except Exception as e:
             results["errors"].append(f"S3 storage error: {e}")
@@ -130,14 +129,15 @@ async def submit_job(request):
             {"error": "RunPod API Key and Endpoint ID are required"}, status=400
         )
 
-    volume_id = settings.get("volumeId", "")
+    bucket = settings.get("bucketName", "")
     s3_access = settings.get("s3AccessKey", "")
     s3_secret = settings.get("s3SecretKey", "")
+    s3_endpoint = settings.get("s3Endpoint", "")
 
-    if not volume_id or not s3_access or not s3_secret:
-        log.error("S3 credentials and Volume ID are required")
+    if not bucket or not s3_access or not s3_secret or not s3_endpoint:
+        log.error("S3 credentials, endpoint URL, and bucket name are required")
         return web.json_response(
-            {"error": "S3 credentials and Volume ID are required"}, status=400
+            {"error": "S3 credentials, endpoint URL, and bucket name are required"}, status=400
         )
 
     # Validate RunPod API
@@ -161,7 +161,7 @@ async def submit_job(request):
     # Validate S3 access
     try:
         client = _make_s3_client(settings)
-        client.head_bucket(Bucket=volume_id)
+        client.head_bucket(Bucket=bucket)
     except Exception as e:
         log.error(f"S3 storage validation failed: {e}")
         return web.json_response(
@@ -184,7 +184,7 @@ async def submit_job(request):
                     {"error": f"Input file not found: {filename}"}, status=400
                 )
             s3_key = f"inputs/{filename}"
-            upload_file(client, volume_id, s3_key, file_path)
+            upload_file(client, bucket, s3_key, file_path)
             input_files[filename] = s3_key
 
     # Submit to RunPod
