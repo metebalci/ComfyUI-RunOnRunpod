@@ -15,7 +15,8 @@ RUN pip install torch==2.11.0 torchvision torchaudio --index-url https://downloa
 
 # Install Flash Attention 2 (stable layer — compiled from source for CUDA 13.0)
 RUN pip install packaging ninja wheel setuptools
-RUN MAX_JOBS=4 pip install flash-attn --no-build-isolation
+ENV MAX_JOBS=4
+RUN pip install flash-attn --no-build-isolation
 
 # Install RunPod SDK and handler dependencies (stable layer)
 RUN pip install runpod requests
