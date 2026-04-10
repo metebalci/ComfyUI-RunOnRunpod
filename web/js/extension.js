@@ -12,7 +12,6 @@ const STATE = {
 
 let currentState = STATE.IDLE;
 let currentJobId = null;
-let outputGetUrls = {};
 let pollInterval = null;
 
 app.registerExtension({
@@ -21,59 +20,33 @@ app.registerExtension({
     settings: [
         {
             id: "RunOnRunpod.RunPod.endpointId",
-            name: "RunPod Endpoint ID",
+            name: "Endpoint ID",
             type: "text",
             defaultValue: "",
         },
         {
             id: "RunOnRunpod.RunPod.apiKey",
-            name: "RunPod API Key",
+            name: "API Key",
             type: "text",
             defaultValue: "",
         },
         {
-            id: "RunOnRunpod.S3.maxOutputUrls",
-            name: "Max Output URLs per Job",
-            type: "number",
-            defaultValue: 5,
-            attrs: { min: 1, max: 50, step: 1 },
-        },
-        {
-            id: "RunOnRunpod.S3.bucket",
-            name: "S3 Bucket",
+            id: "RunOnRunpod.Storage.volumeId",
+            name: "Network Volume ID",
             type: "text",
             defaultValue: "",
         },
         {
-            id: "RunOnRunpod.S3.secretKey",
+            id: "RunOnRunpod.Storage.s3SecretKey",
             name: "S3 Secret Key",
             type: "text",
             defaultValue: "",
         },
         {
-            id: "RunOnRunpod.S3.accessKey",
+            id: "RunOnRunpod.Storage.s3AccessKey",
             name: "S3 Access Key",
             type: "text",
             defaultValue: "",
-        },
-        {
-            id: "RunOnRunpod.S3.endpoint",
-            name: "S3 Endpoint",
-            type: "text",
-            defaultValue: "",
-        },
-        {
-            id: "RunOnRunpod.S3.provider",
-            name: "S3 Provider",
-            type: "combo",
-            defaultValue: "aws",
-            options: [
-                { text: "AWS S3", value: "aws" },
-                { text: "Cloudflare R2", value: "r2" },
-                { text: "Google Cloud Storage", value: "gcs" },
-                { text: "RunPod", value: "runpod" },
-                { text: "Custom", value: "custom" },
-            ],
         },
     ],
 
@@ -205,8 +178,7 @@ app.registerExtension({
         }
 
         // --- Notification ---
-        function showNotification(urls) {
-            // Remove any existing notification
+        function showNotification(files) {
             document.querySelectorAll(".runpod-notification").forEach(el => el.remove());
 
             const div = document.createElement("div");
@@ -219,23 +191,12 @@ app.registerExtension({
             div.appendChild(closeBtn);
 
             const title = document.createElement("div");
-            title.textContent = `Job completed — ${urls.length} output(s):`;
+            title.textContent = `Job completed — ${files.length} output(s) on network volume`;
             title.style.fontWeight = "bold";
-            title.style.marginBottom = "4px";
             div.appendChild(title);
 
-            urls.forEach((url, i) => {
-                const link = document.createElement("a");
-                link.href = url;
-                link.target = "_blank";
-                link.textContent = `Output ${i + 1}`;
-                div.appendChild(link);
-            });
-
             document.body.appendChild(div);
-
-            // Auto-dismiss after 30 seconds
-            setTimeout(() => div.remove(), 30000);
+            setTimeout(() => div.remove(), 10000);
         }
 
         // --- Polling ---
@@ -252,15 +213,11 @@ app.registerExtension({
                         stopPolling();
                         setState(STATE.COMPLETED);
 
-                        // Show output links
-                        const urls = Object.values(outputGetUrls);
-                        if (urls.length > 0) {
-                            // Filter to only URLs that the worker actually used
-                            // For now show all — worker returns which indices it used
-                            const usedUrls = data.output?.used_indices
-                                ? data.output.used_indices.map(i => outputGetUrls[String(i)])
-                                : urls;
-                            showNotification(usedUrls);
+                        // Show output file count
+                        const outputCount = data.output?.output_count || 0;
+                        const outputFiles = data.output?.output_files || [];
+                        if (outputCount > 0) {
+                            showNotification(outputFiles);
                         }
                     } else if (
                         data.status === "FAILED" ||
@@ -309,7 +266,6 @@ app.registerExtension({
                     }
 
                     currentJobId = data.job_id;
-                    outputGetUrls = data.output_get_urls || {};
                     sessionStorage.setItem("runpod_job_id", currentJobId);
                     startPolling(currentJobId);
                 } catch (err) {

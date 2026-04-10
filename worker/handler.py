@@ -1,6 +1,7 @@
 import os
+import shutil
 import time
-import urllib.request
+import uuid
 
 import requests
 import runpod
@@ -8,15 +9,19 @@ import runpod
 COMFY_URL = "http://127.0.0.1:8188"
 COMFY_INPUT_DIR = "/comfyui/input"
 COMFY_OUTPUT_DIR = "/comfyui/output"
+VOLUME_DIR = "/runpod-volume"
+VOLUME_INPUTS_DIR = os.path.join(VOLUME_DIR, "inputs")
+VOLUME_OUTPUTS_DIR = os.path.join(VOLUME_DIR, "outputs")
 
 
-def download_inputs(input_files: dict):
-    """Download input files from presigned GET URLs to ComfyUI's input directory."""
-    for filename, url in input_files.items():
+def copy_inputs(input_files: dict):
+    """Copy input files from network volume to ComfyUI's input directory."""
+    for filename, s3_key in input_files.items():
+        src = os.path.join(VOLUME_DIR, s3_key)
         dest = os.path.join(COMFY_INPUT_DIR, filename)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        print(f"[RunOnRunpod] Downloading input: {filename}")
-        urllib.request.urlretrieve(url, dest)
+        print(f"[RunOnRunpod] Copying input: {src} -> {dest}")
+        shutil.copy2(src, dest)
 
 
 def queue_workflow(workflow: dict) -> str:
@@ -50,55 +55,31 @@ def collect_outputs(history_entry: dict) -> list[str]:
     files = []
     outputs = history_entry.get("outputs", {})
     for _node_id, node_output in outputs.items():
-        # Images
-        for image in node_output.get("images", []):
-            subfolder = image.get("subfolder", "")
-            filename = image["filename"]
-            path = os.path.join(COMFY_OUTPUT_DIR, subfolder, filename)
-            if os.path.exists(path):
-                files.append(path)
-        # Video/GIFs (VHS and similar)
-        for gif in node_output.get("gifs", []):
-            subfolder = gif.get("subfolder", "")
-            filename = gif["filename"]
-            path = os.path.join(COMFY_OUTPUT_DIR, subfolder, filename)
-            if os.path.exists(path):
-                files.append(path)
-        # Audio
-        for audio in node_output.get("audio", []):
-            subfolder = audio.get("subfolder", "")
-            filename = audio["filename"]
-            path = os.path.join(COMFY_OUTPUT_DIR, subfolder, filename)
-            if os.path.exists(path):
-                files.append(path)
+        for key in ("images", "gifs", "audio"):
+            for item in node_output.get(key, []):
+                subfolder = item.get("subfolder", "")
+                filename = item["filename"]
+                path = os.path.join(COMFY_OUTPUT_DIR, subfolder, filename)
+                if os.path.exists(path):
+                    files.append(path)
     return files
 
 
-def upload_outputs(files: list[str], output_urls: dict) -> list[int]:
-    """Upload output files to S3 via presigned PUT URLs.
+def save_outputs(output_files: list[str], job_prefix: str) -> list[str]:
+    """Copy output files to the network volume outputs directory.
 
-    Returns list of indices that were used.
+    Returns list of output filenames on the volume.
     """
-    used_indices = []
-    url_keys = sorted(output_urls.keys(), key=int)
-
-    for i, file_path in enumerate(files):
-        if i >= len(url_keys):
-            print(f"[RunOnRunpod] Warning: more outputs ({len(files)}) than presigned URLs ({len(url_keys)}), skipping remaining")
-            break
-
-        key = url_keys[i]
-        put_url = output_urls[key]
-
-        with open(file_path, "rb") as f:
-            data = f.read()
-
-        print(f"[RunOnRunpod] Uploading output: {os.path.basename(file_path)} ({len(data)} bytes)")
-        resp = requests.put(put_url, data=data)
-        resp.raise_for_status()
-        used_indices.append(int(key))
-
-    return used_indices
+    os.makedirs(VOLUME_OUTPUTS_DIR, exist_ok=True)
+    saved = []
+    for file_path in output_files:
+        ext = os.path.splitext(file_path)[1]
+        out_name = f"{job_prefix}_{uuid.uuid4().hex[:8]}{ext}"
+        dest = os.path.join(VOLUME_OUTPUTS_DIR, out_name)
+        print(f"[RunOnRunpod] Saving output: {file_path} -> {dest}")
+        shutil.copy2(file_path, dest)
+        saved.append(out_name)
+    return saved
 
 
 def handler(job):
@@ -107,11 +88,11 @@ def handler(job):
         job_input = job["input"]
         workflow = job_input["workflow"]
         input_files = job_input.get("input_files", {})
-        output_urls = job_input.get("output_urls", {})
+        job_prefix = job_input.get("job_prefix", uuid.uuid4().hex[:8])
 
-        # Download input files
+        # Copy input files from network volume
         if input_files:
-            download_inputs(input_files)
+            copy_inputs(input_files)
 
         # Submit workflow to local ComfyUI
         print("[RunOnRunpod] Submitting workflow to ComfyUI...")
@@ -129,18 +110,16 @@ def handler(job):
             error_msg = str(messages) if messages else "Workflow execution failed"
             return {"error": error_msg}
 
-        # Collect and upload outputs
+        # Collect and save outputs to network volume
         output_files = collect_outputs(result)
         print(f"[RunOnRunpod] Found {len(output_files)} output file(s)")
 
-        used_indices = []
-        if output_urls and output_files:
-            used_indices = upload_outputs(output_files, output_urls)
+        saved_files = save_outputs(output_files, job_prefix)
 
         return {
             "status": "success",
-            "used_indices": used_indices,
-            "output_count": len(output_files),
+            "output_count": len(saved_files),
+            "output_files": saved_files,
         }
 
     except Exception as e:
