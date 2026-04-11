@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6C3AED"/>
+      <stop offset="100%" stop-color="#4F46E5"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="0" y="0" width="400" height="400" rx="64" fill="url(#bg)"/>
+
+  <!-- Cloud + cube group, centered in the 400x400 canvas -->
+  <g transform="translate(200,190)">
+    <!-- Cloud shape centered at (0,0) -->
+    <path d="
+      M 100 0
+      A 50 50 0 0 0 55 -45
+      A 65 65 0 0 0 -65 -45
+      A 45 45 0 0 0 -100 0
+      Z
+    " fill="none" stroke="white" stroke-width="8" stroke-linejoin="round" opacity="0.85"/>
+
+    <!-- Wireframe cube centered below cloud -->
+    <!-- Cube front-right face -->
+    <polygon points="0,10 48,32 48,88 0,66"
+      fill="none" stroke="white" stroke-width="6" stroke-linejoin="round" opacity="0.95"/>
+    <!-- Cube front-left face -->
+    <polygon points="0,10 -48,32 -48,88 0,66"
+      fill="none" stroke="white" stroke-width="6" stroke-linejoin="round" opacity="0.95"/>
+    <!-- Cube top face -->
+    <polygon points="0,10 48,32 0,54 -48,32"
+      fill="none" stroke="white" stroke-width="6" stroke-linejoin="round" opacity="0.7"/>
+    <!-- Cube bottom hidden edges -->
+    <line x1="-48" y1="88" x2="0" y2="110" stroke="white" stroke-width="4" stroke-dasharray="6,4" opacity="0.4"/>
+    <line x1="48" y1="88" x2="0" y2="110" stroke="white" stroke-width="4" stroke-dasharray="6,4" opacity="0.4"/>
+  </g>
+</svg>

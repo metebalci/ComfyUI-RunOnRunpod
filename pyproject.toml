@@ -19,6 +19,6 @@ Documentation = "https://github.com/metebalci/ComfyUI-RunOnRunpod/wiki"
 [tool.comfy]
 PublisherId = "metebalci"
 DisplayName = "Run on RunPod"
-Icon = ""
-includes = []
+Icon = "https://raw.githubusercontent.com/metebalci/ComfyUI-RunOnRunpod/main/icon.svg"
+includes = ["web"]
 "requires-comfyui" = ">=0.16.4"
