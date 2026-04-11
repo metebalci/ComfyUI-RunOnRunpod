@@ -118,6 +118,20 @@ After a job ends (whether it succeeds or fails), the plugin downloads output fil
 
 The worker has zero storage configuration — the network volume is mounted locally and it just reads/writes files.
 
+## Troubleshooting
+
+- **Button turns red briefly then back to green** — This can happen if you purge the queue on the RunPod dashboard while a job is running. The plugin detects the job as failed, then recovers to idle. This is normal.
+
+- **Job fails with "400 Bad Request"** — The workflow was rejected by ComfyUI on the worker. The error details (missing nodes, invalid connections, missing models) are shown in the ComfyUI console log. Check which node or model is missing and either add it to the Docker image or upload the model to the network volume.
+
+- **Job stays queued (yellow) for a long time** — No worker is available. Check the RunPod dashboard for throttled workers. If a worker is stuck in "throttled" state, terminate it manually. Consider increasing the idle timeout (30-60s recommended) to avoid throttle/shutdown cycles.
+
+- **Job completes but no output appears locally** — Check the ComfyUI console log for download errors. Common causes: S3 credentials don't have read access, or the output path on the network volume doesn't match what the worker wrote.
+
+- **Missing custom nodes** — If the workflow uses nodes not installed in the worker Docker image, the job will fail with a `prompt_outputs_failed_validation` error listing the unknown node types. Add the missing nodes to `worker/custom_nodes.txt` and rebuild the image.
+
+- **Missing models** — If a model file (checkpoint, LoRA, VAE, text encoder) isn't on the network volume, ComfyUI will reject the workflow with a `value_not_in_list` error. Upload the model to the correct subdirectory under `models/` on the network volume.
+
 ## License
 
 GNU General Public License v3.0. See [LICENSE](LICENSE).
