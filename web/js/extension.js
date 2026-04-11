@@ -300,7 +300,8 @@ app.registerExtension({
         }
 
         async function cleanFolder(folder) {
-            if (!confirm(`Delete all files from ${folder}/ on S3?`)) return;
+            const s = getSettings();
+            if (!confirm(`Delete all files from ${folder}/ on s3://${s.bucketName} at ${s.endpointUrl}?`)) return;
             try {
                 panelDetail.textContent = `Cleaning ${folder}...`;
                 const res = await api.fetchApi("/RunOnRunpod/clean", {
