@@ -63,3 +63,5 @@ jobs:
           tags: |
             metebalci/comfyui-runonrunpod:${{ steps.comfyui.outputs.image_tag }}
             metebalci/comfyui-runonrunpod:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
