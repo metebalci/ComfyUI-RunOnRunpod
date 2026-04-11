@@ -35,13 +35,6 @@ app.registerExtension({
         },
         // Keys
         {
-            id: "Run on Runpod.Keys.apiKey",
-            name: "API Key",
-            type: "text",
-            defaultValue: "",
-            attrs: { type: "password" },
-        },
-        {
             id: "Run on Runpod.Keys.s3SecretKey",
             name: "S3 Secret Key",
             type: "text",
@@ -54,6 +47,13 @@ app.registerExtension({
             type: "text",
             defaultValue: "",
         },
+        {
+            id: "Run on Runpod.Keys.apiKey",
+            name: "API Key",
+            type: "text",
+            defaultValue: "",
+            attrs: { type: "password" },
+        },
         // Storage
         {
             id: "Run on Runpod.Storage.bucketName",
@@ -63,7 +63,7 @@ app.registerExtension({
         },
         {
             id: "Run on Runpod.Storage.s3Endpoint",
-            name: "S3 Endpoint URL",
+            name: "Endpoint URL",
             type: "text",
             defaultValue: "",
         },
