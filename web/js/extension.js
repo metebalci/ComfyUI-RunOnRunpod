@@ -153,8 +153,21 @@ function renderJobList() {
     if (!jobListEl) return;
     jobListEl.innerHTML = "";
 
+    // Settings warning
+    const s = getSettings();
+    const missing = [];
+    if (!s.apiKey) missing.push("API Key");
+    if (!s.endpointId) missing.push("Endpoint ID");
+    if (!s.s3AccessKey) missing.push("S3 Access Key");
+    if (!s.s3SecretKey) missing.push("S3 Secret Key");
+    if (!s.endpointUrl) missing.push("Endpoint URL");
+    if (!s.bucketName) missing.push("Bucket Name");
+    if (missing.length > 0) {
+        jobListEl.innerHTML = `<div class="runpod-warning">Configure in Settings &gt; Run on Runpod:<br>${missing.join(", ")}</div>`;
+    }
+
     if (jobs.length === 0) {
-        jobListEl.innerHTML = '<div class="runpod-empty">No jobs yet. Click Run to submit a workflow.</div>';
+        jobListEl.innerHTML += '<div class="runpod-empty">No jobs yet. Click Run to submit a workflow.</div>';
         return;
     }
 
@@ -286,26 +299,52 @@ const STYLES = `
         display: flex;
         flex-direction: column;
         height: 100%;
-        font-family: Inter, sans-serif;
-        font-size: 13px;
-        color: #ddd;
-        background: #1e1e1e;
+    }
+    /* Fallback for p-toolbar when opened before PrimeVue loads it */
+    .runpod-sidebar .p-toolbar {
+        display: flex;
+        align-items: center;
+    }
+    .runpod-sidebar .p-toolbar-start {
+        display: flex;
+        flex: 1;
+    }
+    .runpod-sidebar .p-toolbar-end {
+        display: flex;
+    }
+    .runpod-title-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 0.375rem;
+        text-decoration: none;
+        color: inherit;
+        opacity: 0.5;
+        font-size: 14px;
+        font-weight: 700;
+        flex-shrink: 0;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+    }
+    .runpod-title-btn:hover {
+        opacity: 1;
+        background: rgba(255,255,255,0.08);
     }
     .runpod-toolbar {
         flex-shrink: 0;
         padding: 10px 12px;
         border-bottom: 1px solid #333;
         display: flex;
-        flex-direction: column;
         gap: 6px;
-    }
-    .runpod-toolbar-row {
-        display: flex;
-        gap: 6px;
+        flex-wrap: wrap;
     }
     .runpod-btn {
         flex: 1;
-        padding: 6px 10px;
+        height: 40px;
+        padding: 0 10px;
         border: 1px solid #555;
         border-radius: 4px;
         background: #2a2a2a;
@@ -330,6 +369,9 @@ const STYLES = `
     .runpod-btn.clean {
         font-size: 11px;
         color: #aaa;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .runpod-btn.pulsing {
         animation: runpod-pulse 1s ease-in-out infinite;
@@ -412,6 +454,15 @@ const STYLES = `
         background: #6e2a2a;
         border-color: #8e3a3a;
         color: #cc4444;
+    }
+    .runpod-warning {
+        padding: 8px 12px;
+        margin: 8px;
+        font-size: 12px;
+        color: #cccc44;
+        background: #3a3a1a;
+        border: 1px solid #555522;
+        border-radius: 6px;
     }
     .runpod-empty {
         color: #666;
@@ -554,8 +605,8 @@ app.registerExtension({
         app.extensionManager.registerSidebarTab({
             id: "runpod",
             icon: "pi pi-cloud",
-            title: "RunPod",
-            tooltip: "Run on RunPod",
+            title: "RoRp",
+            tooltip: "Run on Runpod",
             type: "custom",
             render: (el) => {
                 el.innerHTML = "";
@@ -563,43 +614,78 @@ app.registerExtension({
                 const container = document.createElement("div");
                 container.className = "runpod-sidebar";
 
+                // Title (native p-toolbar classes, with CSS fallback for first-open)
+                const title = document.createElement("div");
+                title.className = "p-toolbar p-component min-h-16 rounded-none border-x-0 border-t-0 bg-transparent px-3 2xl:px-4";
+                title.setAttribute("role", "toolbar");
+
+                const titleStart = document.createElement("div");
+                titleStart.className = "p-toolbar-start min-w-0 flex-1 overflow-hidden";
+
+                const titleText = document.createElement("span");
+                titleText.className = "truncate font-bold";
+                titleText.title = "Run on Runpod";
+                titleText.textContent = "Run on Runpod";
+
+                titleStart.appendChild(titleText);
+
+                const titleEnd = document.createElement("div");
+                titleEnd.className = "p-toolbar-end";
+
+                const infoBtn = document.createElement("a");
+                infoBtn.className = "runpod-title-btn";
+                infoBtn.href = "https://github.com/metebalci/ComfyUI-RunOnRunpod";
+                infoBtn.target = "_blank";
+                infoBtn.title = "GitHub";
+                infoBtn.textContent = "?";
+
+                titleEnd.appendChild(infoBtn);
+
+                title.appendChild(titleStart);
+                title.appendChild(titleEnd);
+
                 // Toolbar (always visible at top)
                 const toolbar = document.createElement("div");
                 toolbar.className = "runpod-toolbar";
 
-                const row1 = document.createElement("div");
-                row1.className = "runpod-toolbar-row";
-
                 const runBtn = document.createElement("button");
                 runBtn.className = "runpod-btn run";
-                runBtn.textContent = "Run";
+                runBtn.innerHTML = '<i class="pi pi-send" style="margin-right:6px;font-size:12px;"></i>Run';
+                runBtn.title = "Submit current workflow to Runpod";
                 runBtn.addEventListener("click", submitJob);
-
-                row1.appendChild(runBtn);
-
-                const row2 = document.createElement("div");
-                row2.className = "runpod-toolbar-row";
 
                 const cleanInputsBtn = document.createElement("button");
                 cleanInputsBtn.className = "runpod-btn clean";
                 cleanInputsBtn.textContent = "Clean Inputs";
+                cleanInputsBtn.title = "Delete uploaded input files from S3 bucket";
                 cleanInputsBtn.addEventListener("click", () => cleanFolder("inputs", cleanInputsBtn));
 
                 const cleanOutputsBtn = document.createElement("button");
                 cleanOutputsBtn.className = "runpod-btn clean";
                 cleanOutputsBtn.textContent = "Clean Outputs";
+                cleanOutputsBtn.title = "Delete output files from S3 bucket";
                 cleanOutputsBtn.addEventListener("click", () => cleanFolder("outputs", cleanOutputsBtn));
 
-                row2.appendChild(cleanInputsBtn);
-                row2.appendChild(cleanOutputsBtn);
+                const cleanJobsBtn = document.createElement("button");
+                cleanJobsBtn.className = "runpod-btn clean";
+                cleanJobsBtn.textContent = "Clean Jobs";
+                cleanJobsBtn.title = "Remove finished jobs from the list";
+                cleanJobsBtn.addEventListener("click", () => {
+                    const active = [JOB_STATE.PREPARING, JOB_STATE.QUEUED, JOB_STATE.RUNNING];
+                    jobs = jobs.filter(j => active.includes(j.state));
+                    renderJobList();
+                });
 
-                toolbar.appendChild(row1);
-                toolbar.appendChild(row2);
+                toolbar.appendChild(runBtn);
+                toolbar.appendChild(cleanInputsBtn);
+                toolbar.appendChild(cleanOutputsBtn);
+                toolbar.appendChild(cleanJobsBtn);
 
                 // Job list (scrollable)
                 jobListEl = document.createElement("div");
                 jobListEl.className = "runpod-jobs";
 
+                container.appendChild(title);
                 container.appendChild(toolbar);
                 container.appendChild(jobListEl);
                 el.appendChild(container);
