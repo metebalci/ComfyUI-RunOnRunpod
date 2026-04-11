@@ -11,8 +11,6 @@ const STATE = {
 
 let currentState = STATE.IDLE;
 let currentJobId = null;
-let currentInputFiles = {};
-let pollInterval = null;
 
 app.registerExtension({
     name: "RunOnRunpod",
@@ -333,85 +331,37 @@ app.registerExtension({
             cleanOutputsBtn.disabled = busy;
         }
 
-        // --- Download outputs and cleanup ---
-        async function handleJobEnd(outputFiles) {
-            const s = getSettings();
-            try {
-                const res = await api.fetchApi("/RunOnRunpod/download", {
-                    method: "POST",
-                    body: JSON.stringify({
-                        output_files: outputFiles,
-                        input_files: currentInputFiles,
-                        delete_inputs: s.deleteInputsAfterJob,
-                        delete_outputs: s.deleteOutputsAfterJob,
-                        settings: s,
-                    }),
-                });
-                const data = await res.json();
-                if (data.downloaded && data.downloaded.length > 0) {
-                    console.log(`[RunOnRunpod] Downloaded ${data.downloaded.length} file(s) to local output directory`);
-                }
-                return data.downloaded || [];
-            } catch (err) {
-                console.error("[RunOnRunpod] Download/cleanup error:", err);
-                return [];
-            }
-        }
+        // --- WebSocket event handling ---
+        api.addEventListener("runonrunpod", (event) => {
+            const { event: evt, job_id, message, files, error } = event.detail;
 
-        // --- Polling ---
-        function startPolling(jobId) {
-            setState(STATE.QUEUED);
-            showPanel("Queued on RunPod...");
-            pollInterval = setInterval(async () => {
-                try {
-                    const res = await api.fetchApi("/RunOnRunpod/status", {
-                        method: "POST",
-                        body: JSON.stringify({ job_id: jobId, settings: getSettings() }),
-                    });
-                    const data = await res.json();
-
-                    if (data.status === "IN_PROGRESS") {
-                        setState(STATE.RUNNING);
-                        showPanel("Running...");
-                    } else if (data.status === "COMPLETED") {
-                        stopPolling();
-                        console.log(`[RunOnRunpod] Job completed, output:`, data.output);
-                        const outputFiles = data.output?.output_files || [];
-                        const downloaded = await handleJobEnd(outputFiles);
-                        showPanel("Completed", "", downloaded);
-                        setState(STATE.IDLE);
-                    } else if (
-                        data.status === "FAILED" ||
-                        data.status === "CANCELLED" ||
-                        data.status === "TIMED_OUT" ||
-                        data.status === "UNKNOWN"
-                    ) {
-                        stopPolling();
-                        const errorMsg = data.error || data.output?.error || `Job ${data.status}`;
-                        console.error(`[RunOnRunpod] ${errorMsg}`);
-                        await handleJobEnd([]);
-                        showPanel("Failed", errorMsg);
-                        setState(STATE.IDLE);
-                    }
-                } catch (err) {
-                    console.error("[RunOnRunpod] Polling error:", err);
-                    stopPolling();
-                    showPanel("Failed", "Polling error");
+            switch (evt) {
+                case "progress":
+                    panelDetail.textContent = message;
+                    break;
+                case "queued":
+                    currentJobId = job_id;
+                    setState(STATE.QUEUED);
+                    showPanel("Queued on RunPod...");
+                    break;
+                case "running":
+                    setState(STATE.RUNNING);
+                    showPanel("Running...");
+                    break;
+                case "completed":
+                    console.log(`[RunOnRunpod] Job ${job_id} completed, ${(files || []).length} file(s)`);
+                    showPanel("Completed", "", files || []);
+                    currentJobId = null;
                     setState(STATE.IDLE);
-                }
-            }, 2000);
-        }
-
-        function stopPolling() {
-            if (pollInterval) {
-                clearInterval(pollInterval);
-                pollInterval = null;
+                    break;
+                case "failed":
+                    console.error(`[RunOnRunpod] Job ${job_id} failed: ${error}`);
+                    showPanel("Failed", error || "Unknown error");
+                    currentJobId = null;
+                    setState(STATE.IDLE);
+                    break;
             }
-            currentJobId = null;
-            currentInputFiles = {};
-            sessionStorage.removeItem("runpod_job_id");
-            sessionStorage.removeItem("runpod_input_files");
-        }
+        });
 
         // --- Submit job ---
         async function submitJob() {
@@ -432,7 +382,6 @@ app.registerExtension({
             }
 
             setState(STATE.PREPARING);
-            showPanel("Preparing...", "Uploading models and inputs");
 
             try {
                 const prompt = await app.graphToPrompt();
@@ -451,10 +400,6 @@ app.registerExtension({
                 }
 
                 currentJobId = data.job_id;
-                currentInputFiles = data.input_files || {};
-                sessionStorage.setItem("runpod_job_id", currentJobId);
-                sessionStorage.setItem("runpod_input_files", JSON.stringify(currentInputFiles));
-                startPolling(currentJobId);
             } catch (err) {
                 console.error("[RunOnRunpod] Submit error:", err);
                 showPanel("Failed", String(err));
@@ -473,25 +418,13 @@ app.registerExtension({
             } catch (err) {
                 console.error("[RunOnRunpod] Cancel error:", err);
             }
-            stopPolling();
             showPanel("Cancelled");
+            currentJobId = null;
             setState(STATE.IDLE);
         }
 
         runBtn.addEventListener("click", submitJob);
         cancelBtn.addEventListener("click", cancelJob);
-
-        // --- Resume polling on page reload ---
-        const savedJobId = sessionStorage.getItem("runpod_job_id");
-        if (savedJobId) {
-            currentJobId = savedJobId;
-            try {
-                currentInputFiles = JSON.parse(sessionStorage.getItem("runpod_input_files") || "{}");
-            } catch {
-                currentInputFiles = {};
-            }
-            startPolling(savedJobId);
-        }
 
         // --- Insert panel into menu ---
         const insertPanel = () => {

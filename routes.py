@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 
@@ -11,8 +12,15 @@ _PREFIX = "[RunOnRunpod]"
 
 routes = PromptServer.instance.routes
 
-# In-memory job state for the current session
-_active_job = {}
+
+# In-memory state for the active job
+_active_task = None  # asyncio.Task for the background polling loop
+_active_settings = {}  # settings snapshot for cancel/cleanup
+
+
+def _send_event(event: str, data: dict = {}):
+    """Push an event to the frontend via WebSocket."""
+    PromptServer.instance.send_sync("runonrunpod", {"event": event, **data})
 
 # Known input node types and the field that holds the filename
 INPUT_NODE_FIELDS = {
@@ -210,6 +218,8 @@ async def submit_job(request):
             {"error": "S3 credentials, endpoint URL, and bucket name are required"}, status=400
         )
 
+    _send_event("progress", {"message": "Validating credentials..."})
+
     # Validate RunPod API
     try:
         async with aiohttp.ClientSession() as session:
@@ -251,6 +261,7 @@ async def submit_job(request):
                 return web.json_response(
                     {"error": f"Input file not found: {filename}"}, status=400
                 )
+            _send_event("progress", {"message": f"Uploading input: {filename}"})
             s3_key = upload_file_dedup(client, bucket, file_path)
             input_files[filename] = s3_key
 
@@ -263,12 +274,15 @@ async def submit_job(request):
                 if not key_exists(client, bucket, s3_key):
                     local_path = _find_model_file(subdir, filename)
                     if local_path:
+                        _send_event("progress", {"message": f"Uploading model: {filename}"})
                         print(_PREFIX, f"Uploading missing model: {local_path} -> {s3_key}")
                         upload_file(client, bucket, s3_key, local_path)
                     else:
                         print(_PREFIX, f"Model not found locally: {subdir}/{filename}")
                 else:
                     print(_PREFIX, f"Model already on volume: {s3_key}")
+
+    _send_event("progress", {"message": "Submitting to RunPod..."})
 
     # Submit to RunPod
     payload = {
@@ -292,85 +306,79 @@ async def submit_job(request):
         )
 
     job_id = result["id"]
-    _active_job = {"job_id": job_id}
-    print(_PREFIX,f"Job submitted: {job_id}, polling every 2s")
+    print(_PREFIX, f"Job submitted: {job_id}")
+    _send_event("queued", {"job_id": job_id})
+
+    # Start background task to poll RunPod and handle completion
+    global _active_task, _active_settings
+    _active_settings = {"settings": settings, "input_files": input_files, "job_id": job_id}
+    _active_task = asyncio.create_task(_poll_and_finish(job_id, settings, input_files))
 
     return web.json_response({
         "job_id": job_id,
         "status": result.get("status", "IN_QUEUE"),
-        "input_files": input_files,
     })
 
 
-@routes.post("/RunOnRunpod/status")
-async def get_status(request):
-    data = await request.json()
-    settings = data.get("settings", {})
-    job_id = data.get("job_id", "")
-
+async def _poll_and_finish(job_id: str, settings: dict, input_files: dict):
+    """Background task: poll RunPod for job status, download outputs on completion."""
     api_key = settings.get("apiKey", "")
     endpoint_id = settings.get("endpointId", "")
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
-                headers={"Authorization": f"Bearer {api_key}"},
-            ) as resp:
-                if resp.status == 404:
-                    print(_PREFIX,f"Job {job_id}: not found (404)")
-                    return web.json_response({
-                        "status": "UNKNOWN",
-                        "output": None,
-                        "error": "Job not found",
-                    })
-                result = await resp.json()
-    except Exception as e:
-        print(_PREFIX,f"Job {job_id}: status check failed: {e}")
-        return web.json_response({
-            "status": "UNKNOWN",
-            "output": None,
-            "error": str(e),
-        })
+        while True:
+            await asyncio.sleep(2)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                    ) as resp:
+                        if resp.status == 404:
+                            print(_PREFIX, f"Job {job_id}: not found (404)")
+                            _send_event("failed", {"job_id": job_id, "error": "Job not found"})
+                            return
+                        result = await resp.json()
+            except Exception as e:
+                print(_PREFIX, f"Job {job_id}: status check failed: {e}")
+                continue
 
-    status = result.get("status", "UNKNOWN")
-    error = result.get("error")
-    output = result.get("output")
+            status = result.get("status", "UNKNOWN")
 
-    if status == "COMPLETED":
-        print(_PREFIX,f"Job {job_id}: COMPLETED, output:\n{json.dumps(output, indent=2)}")
-    elif status == "FAILED":
-        print(_PREFIX,f"Job {job_id} FAILED:\n{json.dumps(error or output, indent=2)}")
-    elif status in ("CANCELLED", "TIMED_OUT"):
-        print(_PREFIX,f"Job {job_id}: {status}")
-    else:
-        print(_PREFIX,f"Job {job_id}: {status}")
+            if status == "IN_PROGRESS":
+                _send_event("running", {"job_id": job_id})
+            elif status == "COMPLETED":
+                output = result.get("output", {})
+                print(_PREFIX, f"Job {job_id}: COMPLETED, output:\n{json.dumps(output, indent=2)}")
+                output_files = output.get("output_files", [])
+                downloaded = await _download_and_cleanup(settings, output_files, input_files)
+                _send_event("completed", {"job_id": job_id, "files": downloaded})
+                return
+            elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
+                error = result.get("error") or result.get("output", {}).get("error") or status
+                print(_PREFIX, f"Job {job_id}: {status}: {error}")
+                _send_event("failed", {"job_id": job_id, "error": str(error)})
+                return
 
-    return web.json_response({
-        "status": status,
-        "output": output,
-        "error": error,
-    })
+    except asyncio.CancelledError:
+        print(_PREFIX, f"Job {job_id}: polling cancelled")
+    finally:
+        global _active_task
+        _active_task = None
 
 
-@routes.post("/RunOnRunpod/download")
-async def download_outputs(request):
-    """Download output files from S3 to local ComfyUI and optionally clean up."""
-    data = await request.json()
-    settings = data.get("settings", {})
-    output_files = data.get("output_files", [])
-    input_files = data.get("input_files", {})
-    delete_inputs = data.get("delete_inputs", False)
-    delete_outputs = data.get("delete_outputs", False)
-
+async def _download_and_cleanup(settings: dict, output_files: list, input_files: dict):
+    """Download output files from S3 and optionally clean up."""
     bucket = settings.get("bucketName", "")
+    delete_inputs = settings.get("deleteInputsAfterJob", False)
+    delete_outputs = settings.get("deleteOutputsAfterJob", True)
+
     try:
         client = _make_s3_client(settings)
     except Exception as e:
         print(_PREFIX, f"S3 client error: {e}")
-        return web.json_response({"error": str(e)}, status=400)
+        return []
 
-    # Download output files to local ComfyUI output directory
     downloaded = []
     if output_files:
         output_dir = _get_output_directory()
@@ -379,13 +387,13 @@ async def download_outputs(request):
             dest = os.path.join(output_dir, rel_path)
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             try:
+                _send_event("progress", {"message": f"Downloading: {os.path.basename(rel_path)}"})
                 print(_PREFIX, f"Downloading {s3_key} -> {dest}")
                 download_file(client, bucket, s3_key, dest)
                 downloaded.append(rel_path)
             except Exception as e:
                 print(_PREFIX, f"Failed to download {s3_key}: {e}")
 
-    # Clean up remote outputs
     if delete_outputs and output_files:
         try:
             s3_keys = [f"outputs/{rel_path}" for rel_path in output_files]
@@ -394,7 +402,6 @@ async def download_outputs(request):
         except Exception as e:
             print(_PREFIX, f"Failed to delete outputs: {e}")
 
-    # Clean up remote inputs
     if delete_inputs and input_files:
         try:
             s3_keys = list(input_files.values())
@@ -403,18 +410,20 @@ async def download_outputs(request):
         except Exception as e:
             print(_PREFIX, f"Failed to delete inputs: {e}")
 
-    return web.json_response({
-        "downloaded": downloaded,
-    })
+    return downloaded
 
 
 @routes.post("/RunOnRunpod/cancel")
 async def cancel_job(request):
-    global _active_job
+    global _active_task
 
     data = await request.json()
     settings = data.get("settings", {})
     job_id = data.get("job_id", "")
+
+    # Cancel the background polling task
+    if _active_task and not _active_task.done():
+        _active_task.cancel()
 
     api_key = settings.get("apiKey", "")
     endpoint_id = settings.get("endpointId", "")
@@ -425,8 +434,6 @@ async def cancel_job(request):
             headers={"Authorization": f"Bearer {api_key}"},
         ) as resp:
             result = await resp.json()
-
-    _active_job = {}
 
     return web.json_response({
         "status": result.get("status", "CANCELLED"),
