@@ -67,6 +67,7 @@ def _make_s3_client(settings: dict):
     """Create S3 client from settings."""
     return get_s3_client({
         "endpoint_url": settings.get("endpointUrl"),
+        "region": settings.get("region"),
         "s3_access_key": settings.get("s3AccessKey"),
         "s3_secret_key": settings.get("s3SecretKey"),
     })

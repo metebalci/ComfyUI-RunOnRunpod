@@ -1,24 +1,14 @@
 import hashlib
 import os
-from urllib.parse import urlparse
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
 
-def _extract_region(endpoint_url: str) -> str:
-    """Extract region from S3 endpoint URL (e.g. 'https://eur-is-1.storjshare.io' -> 'eur-is-1')."""
-    hostname = urlparse(endpoint_url).hostname or ""
-    parts = hostname.split(".")
-    if len(parts) >= 2:
-        return parts[0]
-    return "us-east-1"
-
-
 def get_s3_client(settings: dict):
     endpoint_url = settings.get("endpoint_url") or None
-    region = _extract_region(endpoint_url) if endpoint_url else "us-east-1"
+    region = settings.get("region") or "us-east-1"
     return boto3.client(
         "s3",
         endpoint_url=endpoint_url,

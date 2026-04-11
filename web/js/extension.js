@@ -62,6 +62,12 @@ app.registerExtension({
             defaultValue: "",
         },
         {
+            id: "Run on Runpod.Storage.region",
+            name: "Region",
+            type: "text",
+            defaultValue: "",
+        },
+        {
             id: "Run on Runpod.Storage.bucketName",
             name: "Bucket Name",
             type: "text",
@@ -86,6 +92,7 @@ app.registerExtension({
                 s3AccessKey: app.extensionManager.setting.get("Run on Runpod.Keys.s3AccessKey") || "",
                 s3SecretKey: app.extensionManager.setting.get("Run on Runpod.Keys.s3SecretKey") || "",
                 endpointUrl: app.extensionManager.setting.get("Run on Runpod.Storage.endpointUrl") || "",
+                region: app.extensionManager.setting.get("Run on Runpod.Storage.region") || "",
                 bucketName: app.extensionManager.setting.get("Run on Runpod.Storage.bucketName") || "",
                 deleteInputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteInputsAfterJob") ?? false,
                 deleteOutputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteOutputsAfterJob") ?? true,
