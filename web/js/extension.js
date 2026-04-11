@@ -7,8 +7,6 @@ const STATE = {
     PREPARING: "preparing",
     QUEUED: "queued",
     RUNNING: "running",
-    COMPLETED: "completed",
-    FAILED: "failed",
 };
 
 let currentState = STATE.IDLE;
@@ -149,14 +147,6 @@ app.registerExtension({
                 color: #fff;
                 animation: runpod-pulse 1.5s ease-in-out infinite;
             }
-            .runpod-btn.completed {
-                background: #5cb85c;
-                color: #fff;
-            }
-            .runpod-btn.failed {
-                background: #d9534f;
-                color: #fff;
-            }
             @keyframes runpod-pulse {
                 0%, 100% { opacity: 1; }
                 50% { opacity: 0.6; }
@@ -188,8 +178,8 @@ app.registerExtension({
                 padding: 8px 12px;
                 border-bottom: 1px solid #333;
             }
-            .runpod-panel-status {
-                font-weight: 500;
+            .runpod-panel-title {
+                font-weight: 600;
             }
             .runpod-panel-close {
                 background: none;
@@ -244,8 +234,9 @@ app.registerExtension({
         const panelHeader = document.createElement("div");
         panelHeader.className = "runpod-panel-header";
 
-        const panelStatus = document.createElement("span");
-        panelStatus.className = "runpod-panel-status";
+        const panelTitle = document.createElement("span");
+        panelTitle.className = "runpod-panel-title";
+        panelTitle.textContent = "Run on RunPod";
 
         const panelClose = document.createElement("button");
         panelClose.className = "runpod-panel-close";
@@ -255,7 +246,7 @@ app.registerExtension({
             panel.classList.remove("open");
         });
 
-        panelHeader.appendChild(panelStatus);
+        panelHeader.appendChild(panelTitle);
         panelHeader.appendChild(panelClose);
 
         const panelDetail = document.createElement("div");
@@ -277,8 +268,7 @@ app.registerExtension({
         });
 
         function showPanel(statusText, detailText = "", gallery = []) {
-            panelStatus.textContent = statusText;
-            panelDetail.textContent = detailText;
+            panelDetail.textContent = detailText ? `${statusText}: ${detailText}` : statusText;
             panelGallery.innerHTML = "";
             for (const relPath of gallery) {
                 const parts = relPath.split("/");
@@ -291,18 +281,13 @@ app.registerExtension({
             panel.classList.add("open");
         }
 
-        function hidePanel() {
-            panel.classList.remove("open");
-        }
-
         // --- State management ---
-        function setState(state, extra = {}) {
+        function setState(state) {
             currentState = state;
-            btn.classList.remove("preparing", "queued", "running", "completed", "failed");
+            btn.classList.remove("preparing", "queued", "running");
 
             switch (state) {
                 case STATE.IDLE:
-                    hidePanel();
                     break;
                 case STATE.PREPARING:
                     btn.classList.add("preparing");
@@ -315,16 +300,6 @@ app.registerExtension({
                 case STATE.RUNNING:
                     btn.classList.add("running");
                     showPanel("Running...");
-                    break;
-                case STATE.COMPLETED:
-                    btn.classList.add("completed");
-                    showPanel("Completed", "", extra.gallery || []);
-                    setTimeout(() => setState(STATE.IDLE), 10000);
-                    break;
-                case STATE.FAILED:
-                    btn.classList.add("failed");
-                    showPanel("Failed", extra.error || "");
-                    setTimeout(() => setState(STATE.IDLE), 10000);
                     break;
             }
         }
@@ -372,7 +347,8 @@ app.registerExtension({
                         console.log(`[RunOnRunpod] Job completed, output:`, data.output);
                         const outputFiles = data.output?.output_files || [];
                         const downloaded = await handleJobEnd(outputFiles);
-                        setState(STATE.COMPLETED, { gallery: downloaded });
+                        showPanel("Completed", "", downloaded);
+                        setState(STATE.IDLE);
                     } else if (
                         data.status === "FAILED" ||
                         data.status === "CANCELLED" ||
@@ -383,12 +359,14 @@ app.registerExtension({
                         const errorMsg = data.error || data.output?.error || `Job ${data.status}`;
                         console.error(`[RunOnRunpod] ${errorMsg}`);
                         await handleJobEnd([]);
-                        setState(STATE.FAILED, { error: errorMsg });
+                        showPanel("Failed", errorMsg);
+                        setState(STATE.IDLE);
                     }
                 } catch (err) {
                     console.error("[RunOnRunpod] Polling error:", err);
                     stopPolling();
-                    setState(STATE.FAILED);
+                    showPanel("Failed", "Polling error");
+                    setState(STATE.IDLE);
                 }
             }, 2000);
         }
@@ -418,7 +396,8 @@ app.registerExtension({
                 if (!s.bucketName) missing.push("Bucket Name");
                 if (missing.length > 0) {
                     console.error("[RunOnRunpod] Missing settings:", missing.join(", "));
-                    setState(STATE.FAILED, { error: `Missing settings: ${missing.join(", ")}` });
+                    showPanel("Failed", `Missing settings: ${missing.join(", ")}`);
+                    setState(STATE.IDLE);
                     return;
                 }
 
@@ -437,7 +416,8 @@ app.registerExtension({
 
                     if (data.error) {
                         console.error("[RunOnRunpod] Submit error:", data.error);
-                        setState(STATE.FAILED, { error: data.error });
+                        showPanel("Failed", data.error);
+                        setState(STATE.IDLE);
                         return;
                     }
 
@@ -448,7 +428,8 @@ app.registerExtension({
                     startPolling(currentJobId);
                 } catch (err) {
                     console.error("[RunOnRunpod] Submit error:", err);
-                    setState(STATE.FAILED, { error: String(err) });
+                    showPanel("Failed", String(err));
+                    setState(STATE.IDLE);
                 }
             } else if (currentState === STATE.QUEUED || currentState === STATE.RUNNING) {
                 // Cancel
