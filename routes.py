@@ -192,6 +192,42 @@ async def verify_settings(request):
     return web.json_response(results)
 
 
+@routes.post("/RunOnRunpod/node-list")
+async def get_node_list(request):
+    """Fetch available node types from the RunPod worker."""
+    data = await request.json()
+    settings = data.get("settings", {})
+
+    api_key = settings.get("apiKey", "")
+    endpoint_id = settings.get("endpointId", "")
+
+    if not api_key or not endpoint_id:
+        return web.json_response(
+            {"error": "API Key and Endpoint ID are required"}, status=400
+        )
+
+    # Submit a sync request to the worker with the node_list action
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"https://api.runpod.ai/v2/{endpoint_id}/runsync",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"input": {"action": "node_list"}},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                result = await resp.json()
+    except Exception as e:
+        print(_PREFIX, f"Node list request failed: {e}")
+        return web.json_response({"error": f"Failed to reach worker: {e}"}, status=500)
+
+    if result.get("status") == "COMPLETED":
+        output = result.get("output", {})
+        return web.json_response({"node_list": output.get("node_list", [])})
+    else:
+        error = result.get("error") or result.get("output", {}).get("error") or "Unknown error"
+        return web.json_response({"error": f"Worker error: {error}"}, status=500)
+
+
 @routes.post("/RunOnRunpod/cancel-prepare")
 async def cancel_prepare(request):
     """Cancel the current submit/upload preparation phase."""

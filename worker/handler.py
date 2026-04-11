@@ -93,10 +93,22 @@ def save_outputs(output_files: list[str], job_prefix: str) -> list[str]:
     return saved
 
 
+def get_node_list() -> list[str]:
+    """Query ComfyUI's /object_info and return list of available node class types."""
+    resp = requests.get(f"{COMFY_URL}/object_info")
+    resp.raise_for_status()
+    return list(resp.json().keys())
+
+
 def handler(job):
     """RunPod serverless handler."""
     try:
         job_input = job["input"]
+
+        # Return node list if requested
+        if job_input.get("action") == "node_list":
+            return {"node_list": get_node_list()}
+
         workflow = job_input["workflow"]
         input_files = job_input.get("input_files", {})
         timestamp = time.strftime("%Y%m%d%H%M%S")

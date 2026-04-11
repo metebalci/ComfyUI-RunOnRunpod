@@ -196,12 +196,47 @@ async function submitJob() {
         return;
     }
 
-    // Create a temporary job entry while preparing
+    // Create job entry early so user sees status during node check
     const prepId = `prep-${crypto.randomUUID()}`;
     const job = addJob(prepId);
 
+    // Get workflow first to extract node types
+    const prompt = await app.graphToPrompt();
+    const workflowNodes = new Set(
+        Object.values(prompt.output).map(n => n.class_type).filter(Boolean)
+    );
+
+    // Check node compatibility with the worker
+    updateJob(prepId, { message: "Checking custom nodes..." });
     try {
-        const prompt = await app.graphToPrompt();
+        const nlRes = await api.fetchApi("/RunOnRunpod/node-list", {
+            method: "POST",
+            body: JSON.stringify({ settings: getSettings() }),
+        });
+        const nlData = await nlRes.json();
+
+        if (nlData.error) {
+            updateJob(prepId, { state: JOB_STATE.FAILED, message: `Cannot check worker nodes: ${nlData.error}` });
+            return;
+        }
+
+        const workerNodes = new Set(nlData.node_list || []);
+        const missingNodes = [...workflowNodes].filter(n => !workerNodes.has(n));
+
+        if (missingNodes.length > 0) {
+            updateJob(prepId, {
+                state: JOB_STATE.FAILED,
+                message: `Missing custom nodes on worker: ${missingNodes.join(", ")}`,
+            });
+            return;
+        }
+    } catch (err) {
+        console.error("[RunOnRunpod] Node list check failed:", err);
+        updateJob(prepId, { state: JOB_STATE.FAILED, message: `Node check failed: ${err}` });
+        return;
+    }
+
+    try {
 
         const res = await api.fetchApi("/RunOnRunpod/submit", {
             method: "POST",
