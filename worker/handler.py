@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import time
@@ -32,10 +33,10 @@ def queue_workflow(workflow: dict) -> str:
     )
     if not resp.ok:
         try:
-            detail = resp.json()
+            detail = json.dumps(resp.json(), indent=2)
         except Exception:
             detail = resp.text
-        raise RuntimeError(f"ComfyUI rejected workflow (HTTP {resp.status_code}): {detail}")
+        raise RuntimeError(f"ComfyUI rejected workflow (HTTP {resp.status_code}):\n{detail}")
     data = resp.json()
     if "error" in data:
         raise RuntimeError(f"ComfyUI rejected workflow: {data['error']}")
