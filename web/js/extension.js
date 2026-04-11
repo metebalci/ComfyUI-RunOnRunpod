@@ -4,6 +4,7 @@ import { api } from "../../scripts/api.js";
 // --- State machine ---
 const STATE = {
     IDLE: "idle",
+    PREPARING: "preparing",
     QUEUED: "queued",
     RUNNING: "running",
     COMPLETED: "completed",
@@ -133,6 +134,11 @@ app.registerExtension({
             .runpod-btn:hover {
                 opacity: 0.85;
             }
+            .runpod-btn.preparing {
+                background: #17a2b8;
+                color: #fff;
+                animation: runpod-pulse 1.5s ease-in-out infinite;
+            }
             .runpod-btn.queued {
                 background: #f0ad4e;
                 color: #000;
@@ -171,9 +177,12 @@ app.registerExtension({
         // --- State management ---
         function setState(state) {
             currentState = state;
-            btn.classList.remove("queued", "running", "completed", "failed");
+            btn.classList.remove("preparing", "queued", "running", "completed", "failed");
 
             switch (state) {
+                case STATE.PREPARING:
+                    btn.classList.add("preparing");
+                    break;
                 case STATE.QUEUED:
                     btn.classList.add("queued");
                     break;
@@ -281,8 +290,8 @@ app.registerExtension({
                     return;
                 }
 
-                // Immediately show we're working
-                setState(STATE.QUEUED);
+                // Immediately show we're preparing
+                setState(STATE.PREPARING);
 
                 // Submit
                 try {

@@ -104,7 +104,8 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
 1. Build your workflow in ComfyUI as usual
 2. Click **Run on RunPod**
 3. Watch the button color for status:
-   - **Yellow** — queued
+   - **Cyan (pulsing)** — preparing (validating, uploading models/inputs)
+   - **Amber** — queued on RunPod
    - **Blue (pulsing)** — running
    - **Green** — completed
    - **Red** — failed
