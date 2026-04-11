@@ -105,6 +105,10 @@ def handler(job):
     try:
         job_input = job["input"]
 
+        # Lightweight ping to check if worker is up
+        if job_input.get("action") == "ping":
+            return {"status": "ok"}
+
         # Return node list if requested
         if job_input.get("action") == "node_list":
             return {"node_list": get_node_list()}

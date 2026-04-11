@@ -192,40 +192,40 @@ async def verify_settings(request):
     return web.json_response(results)
 
 
-@routes.post("/RunOnRunpod/node-list")
-async def get_node_list(request):
-    """Fetch available node types from the RunPod worker."""
-    data = await request.json()
-    settings = data.get("settings", {})
+async def _runpod_action(endpoint_id: str, api_key: str, action: str) -> dict:
+    """Submit an action to the RunPod worker via /run and poll until complete.
 
-    api_key = settings.get("apiKey", "")
-    endpoint_id = settings.get("endpointId", "")
+    Returns the job output dict on success, raises RuntimeError on failure.
+    """
+    headers = {"Authorization": f"Bearer {api_key}"}
 
-    if not api_key or not endpoint_id:
-        return web.json_response(
-            {"error": "API Key and Endpoint ID are required"}, status=400
-        )
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"https://api.runpod.ai/v2/{endpoint_id}/run",
+            headers=headers,
+            json={"input": {"action": action}},
+        ) as resp:
+            result = await resp.json()
 
-    # Submit a sync request to the worker with the node_list action
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"https://api.runpod.ai/v2/{endpoint_id}/runsync",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={"input": {"action": "node_list"}},
-                timeout=aiohttp.ClientTimeout(total=30),
+    job_id = result.get("id")
+    if not job_id:
+        raise RuntimeError(result.get("error", f"Failed to submit {action}"))
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            await asyncio.sleep(2)
+            async with session.get(
+                f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
+                headers=headers,
             ) as resp:
-                result = await resp.json()
-    except Exception as e:
-        print(_PREFIX, f"Node list request failed: {e}")
-        return web.json_response({"error": f"Failed to reach worker: {e}"}, status=500)
+                status_result = await resp.json()
 
-    if result.get("status") == "COMPLETED":
-        output = result.get("output", {})
-        return web.json_response({"node_list": output.get("node_list", [])})
-    else:
-        error = result.get("error") or result.get("output", {}).get("error") or "Unknown error"
-        return web.json_response({"error": f"Worker error: {error}"}, status=500)
+            status = status_result.get("status", "UNKNOWN")
+            if status == "COMPLETED":
+                return status_result.get("output", {})
+            elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
+                error = status_result.get("error") or status_result.get("output", {}).get("error") or status
+                raise RuntimeError(f"Worker error: {error}")
 
 
 @routes.post("/RunOnRunpod/cancel-prepare")
@@ -295,6 +295,37 @@ async def submit_job(request):
         return web.json_response(
             {"error": f"S3 storage error: {e}"}, status=400
         )
+
+    # Wait for worker to be available
+    _send_event("progress", {"prep_id": prep_id, "message": "Waiting for worker..."})
+    try:
+        await _runpod_action(endpoint_id, api_key, "ping")
+    except Exception as e:
+        print(_PREFIX, f"Worker ping failed: {e}")
+        return web.json_response({"error": f"Worker not available: {e}"}, status=500)
+
+    if _prepare_cancelled:
+        print(_PREFIX, "Submit cancelled during worker ping")
+        return web.json_response({"error": "Cancelled"}, status=499)
+
+    # Check node compatibility with the worker
+    _send_event("progress", {"prep_id": prep_id, "message": "Checking custom nodes..."})
+    try:
+        output = await _runpod_action(endpoint_id, api_key, "node_list")
+        worker_nodes = set(output.get("node_list", []))
+        workflow_nodes = {node.get("class_type") for node in workflow.values() if node.get("class_type")}
+        missing_nodes = sorted(workflow_nodes - worker_nodes)
+        if missing_nodes:
+            msg = f"Missing custom nodes on worker: {', '.join(missing_nodes)}"
+            print(_PREFIX, msg)
+            return web.json_response({"error": msg}, status=400)
+    except Exception as e:
+        print(_PREFIX, f"Node list check failed: {e}")
+        return web.json_response({"error": f"Node check failed: {e}"}, status=500)
+
+    if _prepare_cancelled:
+        print(_PREFIX, "Submit cancelled during node check")
+        return web.json_response({"error": "Cancelled"}, status=499)
 
     # Upload input files to network volume via S3
     input_files = {}
