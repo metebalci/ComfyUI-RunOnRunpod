@@ -50,7 +50,10 @@ def poll_completion(prompt_id: str, timeout: int = 600) -> dict:
         resp.raise_for_status()
         history = resp.json()
         if prompt_id in history:
-            return history[prompt_id]
+            entry = history[prompt_id]
+            status = entry.get("status", {}).get("completed", False)
+            if status or entry.get("status", {}).get("status_str") in ("success", "error"):
+                return entry
         time.sleep(1)
     raise TimeoutError(f"Workflow did not complete within {timeout}s")
 
@@ -59,14 +62,18 @@ def collect_outputs(history_entry: dict) -> list[str]:
     """Extract output file paths from a ComfyUI history entry."""
     files = []
     outputs = history_entry.get("outputs", {})
+    print(f"[RunOnRunpod] History status: {history_entry.get('status', {})}")
+    print(f"[RunOnRunpod] Output nodes: {list(outputs.keys())}")
     for _node_id, node_output in outputs.items():
-        for key in ("images", "gifs", "audio"):
+        for key in ("images", "gifs", "audio", "videos"):
             for item in node_output.get(key, []):
                 subfolder = item.get("subfolder", "")
                 filename = item["filename"]
                 path = os.path.join(COMFY_OUTPUT_DIR, subfolder, filename)
                 if os.path.exists(path):
                     files.append(path)
+                else:
+                    print(f"[RunOnRunpod] Output file not found: {path}")
     return files
 
 
