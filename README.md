@@ -54,6 +54,8 @@ To build your own image with different custom nodes:
 
 **Memory warning:** Building the Docker image compiles flash-attn from source, which is extremely memory-intensive. Each parallel compilation job uses ~16GB of RAM. The Dockerfile defaults to 2 parallel jobs (`MAX_JOBS` and `NINJA_MAX_JOBS`), requiring ~32GB of RAM. If you have less memory, set both to 1 in the Dockerfile, but you will still need at least 16GB (possibly more).
 
+**GPU architectures:** The Dockerfile compiles flash-attn for all supported GPU architectures. If you only need specific GPUs, you can set `TORCH_CUDA_ARCH_LIST` in the Dockerfile to reduce build time and memory usage (e.g. `ENV TORCH_CUDA_ARCH_LIST="8.0;8.9;9.0"` for A100, RTX 4090, and H100 only).
+
 Create a RunPod Serverless endpoint using the image, with the network volume attached.
 
 ### 3. Install the plugin
