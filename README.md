@@ -1,8 +1,8 @@
 # ComfyUI-RunOnRunpod
 
-A ComfyUI plugin that lets you run workflows on [RunPod Serverless](https://www.runpod.io/product/serverless). Adds a "Run on RunPod" button to the UI that submits the current workflow to your RunPod endpoint and shows results.
+A ComfyUI plugin that lets you run workflows on [RunPod Serverless](https://www.runpod.io/product/serverless). Adds a sidebar panel to the UI that submits workflows to your RunPod endpoint and tracks job progress.
 
-![Run on RunPod button](runonrunpod-button.png)
+![Run on Runpod panel](panel.png)
 
 ## Components
 
@@ -10,13 +10,17 @@ A ComfyUI plugin that lets you run workflows on [RunPod Serverless](https://www.
 
 Installed in your local ComfyUI's `custom_nodes/` directory. Provides:
 
-- **Run on RunPod button** with status indicator (green → yellow → blue → green/red)
-- Click the button to cancel a running job
+- **Sidebar panel** (cloud icon) with Run button and job history
+- **Multi-job support** — submit multiple workflows and track each independently
+- **Real-time status** via WebSocket — preparing, queued, running, completed, failed
+- **Upload progress bar** for model uploads with MB/percentage display
+- **Cancel support** — cancel during upload (waits for current file to finish) or while queued/running on RunPod
 - **Settings panel** for RunPod and storage configuration
 - Uploads input files (images, video, audio) to the network volume before submitting
 - Automatically uploads missing models (checkpoints, LoRAs, VAEs, text encoders, etc.) to the network volume
 - Downloads output files back to your local ComfyUI output directory after job completion
-- Optional cleanup of remote inputs and outputs after each job
+- Optional cleanup of remote inputs/outputs after each job, plus manual clean buttons
+- **Settings warning** — alerts when required settings are not configured
 
 ### Worker (RunPod Serverless)
 
@@ -75,8 +79,6 @@ pip install -r ComfyUI-RunOnRunpod/requirements.txt
 
 Restart ComfyUI.
 
-**Note:** This plugin requires the new menu (Settings -> "Use new menu" -> "Top"). The legacy menu is not supported.
-
 ### 4. Configure
 
 Open ComfyUI Settings and find the **Run on Runpod** section:
@@ -102,16 +104,17 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
 ## Usage
 
 1. Build your workflow in ComfyUI as usual
-2. Click **Run on RunPod**
-3. Watch the button color for status:
-   - **Green** — idle, ready to submit
-   - **Cyan (pulsing)** — preparing (validating, uploading models/inputs)
-   - **Amber** — queued on RunPod
-   - **Blue (pulsing)** — running
-   - **Green** — completed (resets to idle after 3s)
-   - **Red** — failed (resets to idle after 3s)
-4. Outputs are automatically downloaded to your local ComfyUI output directory
-5. Click the button while a job is running to cancel it
+2. Open the **Run on Runpod** sidebar panel (cloud icon on the left)
+3. Click **Run** to submit the workflow
+4. Track progress in the job list:
+   - **preparing** — validating credentials, uploading models/inputs
+   - **queued** — waiting for a RunPod worker
+   - **running** — workflow is executing
+   - **completed** — outputs downloaded to your local ComfyUI output directory
+   - **failed** — check the error message on the job card
+5. Click **X** on a job card to cancel it
+6. Use **Clean Inputs** / **Clean Outputs** to remove files from the network volume
+7. Use **Clean Jobs** to clear finished jobs from the list
 
 ## Storage Architecture
 
@@ -134,11 +137,9 @@ The worker has zero storage configuration — the network volume is mounted loca
 
 ## Troubleshooting
 
-- **Button turns red briefly then back to green** — This can happen if you purge the queue on the RunPod dashboard while a job is running. The plugin detects the job as failed, then recovers to idle. This is normal.
-
 - **Job fails with "400 Bad Request"** — The workflow was rejected by ComfyUI on the worker. The error details (missing nodes, invalid connections, missing models) are shown in the ComfyUI console log. Check which node or model is missing and either add it to the Docker image or upload the model to the network volume.
 
-- **Job stays queued (yellow) for a long time** — No worker is available. Check the RunPod dashboard for throttled workers. If a worker is stuck in "throttled" state, terminate it manually. Consider increasing the idle timeout (30-60s recommended) to avoid throttle/shutdown cycles.
+- **Job stays queued for a long time** — No worker is available. Check the RunPod dashboard for throttled workers. If a worker is stuck in "throttled" state, terminate it manually. Consider increasing the idle timeout (30-60s recommended) to avoid throttle/shutdown cycles.
 
 - **Job completes but no output appears locally** — Check the ComfyUI console log for download errors. Common causes: S3 credentials don't have read access, or the output path on the network volume doesn't match what the worker wrote.
 
