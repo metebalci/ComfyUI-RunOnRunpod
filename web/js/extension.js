@@ -38,22 +38,24 @@ app.registerExtension({
             defaultValue: "",
         },
         {
-            id: "Run on Runpod.Runpod.s3SecretKey",
-            name: "S3 Secret Key",
-            type: "text",
-            defaultValue: "",
-        },
-        {
             id: "Run on Runpod.Runpod.s3AccessKey",
             name: "S3 Access Key",
             type: "text",
             defaultValue: "",
         },
         {
+            id: "Run on Runpod.Runpod.s3SecretKey",
+            name: "S3 Secret Key",
+            type: "text",
+            defaultValue: "",
+            attrs: { type: "password" },
+        },
+        {
             id: "Run on Runpod.Runpod.apiKey",
             name: "API Key",
             type: "text",
             defaultValue: "",
+            attrs: { type: "password" },
         },
         {
             id: "Run on Runpod.Runpod.deleteInputsAfterJob",
