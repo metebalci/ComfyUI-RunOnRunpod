@@ -280,9 +280,12 @@ app.registerExtension({
             panelStatus.textContent = statusText;
             panelDetail.textContent = detailText;
             panelGallery.innerHTML = "";
-            for (const filename of gallery) {
+            for (const relPath of gallery) {
+                const parts = relPath.split("/");
+                const filename = parts.pop();
+                const subfolder = parts.join("/");
                 const img = document.createElement("img");
-                img.src = `/view?filename=${encodeURIComponent(filename)}&type=output`;
+                img.src = `/view?filename=${encodeURIComponent(filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`;
                 panelGallery.appendChild(img);
             }
             panel.classList.add("open");

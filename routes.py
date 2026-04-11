@@ -1,6 +1,5 @@
 import json
 import os
-import uuid
 
 import aiohttp
 from aiohttp import web
@@ -239,8 +238,6 @@ async def submit_job(request):
             {"error": f"S3 storage error: {e}"}, status=400
         )
 
-    job_prefix = str(uuid.uuid4())[:8]
-
     # Upload input files to network volume via S3
     input_files = {}
     input_file_refs = _scan_input_files(workflow)
@@ -278,7 +275,6 @@ async def submit_job(request):
         "input": {
             "workflow": workflow,
             "input_files": input_files,
-            "job_prefix": job_prefix,
         }
     }
 
@@ -380,14 +376,12 @@ async def download_outputs(request):
         output_dir = _get_output_directory()
         for rel_path in output_files:
             s3_key = f"outputs/{rel_path}"
-            job_prefix = rel_path.split("/")[0]
-            basename = os.path.basename(rel_path)
-            filename = f"{job_prefix}_{basename}"
-            dest = os.path.join(output_dir, filename)
+            dest = os.path.join(output_dir, rel_path)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
             try:
                 print(_PREFIX, f"Downloading {s3_key} -> {dest}")
                 download_file(client, bucket, s3_key, dest)
-                downloaded.append(filename)
+                downloaded.append(rel_path)
             except Exception as e:
                 print(_PREFIX, f"Failed to download {s3_key}: {e}")
 

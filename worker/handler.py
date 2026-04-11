@@ -2,8 +2,6 @@ import json
 import os
 import shutil
 import time
-import uuid
-
 import requests
 import runpod
 
@@ -101,7 +99,8 @@ def handler(job):
         job_input = job["input"]
         workflow = job_input["workflow"]
         input_files = job_input.get("input_files", {})
-        job_prefix = job_input.get("job_prefix", uuid.uuid4().hex[:8])
+        timestamp = time.strftime("%Y%m%d%H%M%S")
+        job_prefix = f"{timestamp}_{job['id']}"
 
         # Copy input files from network volume
         if input_files:
