@@ -54,7 +54,7 @@ app.registerExtension({
             defaultValue: "",
             attrs: { type: "password" },
         },
-        // Storage
+        // Storage (UI order: Bucket Name, Region, Endpoint URL)
         {
             id: "Run on Runpod.Storage.endpointUrl",
             name: "Endpoint URL",
