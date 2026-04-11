@@ -56,14 +56,14 @@ app.registerExtension({
         },
         // Storage
         {
-            id: "Run on Runpod.Storage.bucketName",
-            name: "Bucket Name",
+            id: "Run on Runpod.Storage.s3Endpoint",
+            name: "Endpoint URL",
             type: "text",
             defaultValue: "",
         },
         {
-            id: "Run on Runpod.Storage.s3Endpoint",
-            name: "Endpoint URL",
+            id: "Run on Runpod.Storage.bucketName",
+            name: "Bucket Name",
             type: "text",
             defaultValue: "",
         },
