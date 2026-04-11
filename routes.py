@@ -13,9 +13,8 @@ _PREFIX = "[RunOnRunpod]"
 routes = PromptServer.instance.routes
 
 
-# In-memory state for the active job
-_active_task = None  # asyncio.Task for the background polling loop
-_active_settings = {}  # settings snapshot for cancel/cleanup
+# In-memory state for active jobs: {job_id: asyncio.Task}
+_active_tasks = {}
 
 
 def _send_event(event: str, data: dict = {}):
@@ -192,7 +191,6 @@ async def verify_settings(request):
 
 @routes.post("/RunOnRunpod/submit")
 async def submit_job(request):
-    global _active_job
 
     data = await request.json()
     settings = data.get("settings", {})
@@ -310,9 +308,8 @@ async def submit_job(request):
     _send_event("queued", {"job_id": job_id})
 
     # Start background task to poll RunPod and handle completion
-    global _active_task, _active_settings
-    _active_settings = {"settings": settings, "input_files": input_files, "job_id": job_id}
-    _active_task = asyncio.create_task(_poll_and_finish(job_id, settings, input_files))
+    task = asyncio.create_task(_poll_and_finish(job_id, settings, input_files))
+    _active_tasks[job_id] = task
 
     return web.json_response({
         "job_id": job_id,
@@ -363,8 +360,7 @@ async def _poll_and_finish(job_id: str, settings: dict, input_files: dict):
     except asyncio.CancelledError:
         print(_PREFIX, f"Job {job_id}: polling cancelled")
     finally:
-        global _active_task
-        _active_task = None
+        _active_tasks.pop(job_id, None)
 
 
 async def _download_and_cleanup(settings: dict, output_files: list, input_files: dict):
@@ -415,15 +411,14 @@ async def _download_and_cleanup(settings: dict, output_files: list, input_files:
 
 @routes.post("/RunOnRunpod/cancel")
 async def cancel_job(request):
-    global _active_task
-
     data = await request.json()
     settings = data.get("settings", {})
     job_id = data.get("job_id", "")
 
-    # Cancel the background polling task
-    if _active_task and not _active_task.done():
-        _active_task.cancel()
+    # Cancel the background polling task for this job
+    task = _active_tasks.get(job_id)
+    if task and not task.done():
+        task.cancel()
 
     api_key = settings.get("apiKey", "")
     endpoint_id = settings.get("endpointId", "")
