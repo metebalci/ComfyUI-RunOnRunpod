@@ -20,6 +20,8 @@ Installed in your local ComfyUI's `custom_nodes/` directory. Provides:
 - Automatically uploads missing models (checkpoints, LoRAs, VAEs, text encoders, etc.) to the network volume
 - Downloads output files back to your local ComfyUI output directory after job completion
 - Optional cleanup of remote inputs/outputs after each job, plus manual clean buttons
+- **Node compatibility check** — before each job, queries the worker for its available nodes and blocks submission if the workflow uses custom nodes not installed on the worker
+- **Worker availability check** — waits for a worker to be ready before submitting, handling cold starts gracefully
 - **Settings warning** — alerts when required settings are not configured
 
 ### Worker (RunPod Serverless)
@@ -69,7 +71,15 @@ Create a RunPod Serverless endpoint using the image, with the network volume att
 
 ### 3. Install the plugin
 
-Clone this repo into your ComfyUI custom nodes directory:
+**From the ComfyUI Registry:**
+
+```bash
+comfy node install comfyui-runonrunpod
+```
+
+Or install via ComfyUI Manager by searching for "Run on RunPod".
+
+**Manual install:**
 
 ```bash
 cd ComfyUI/custom_nodes
@@ -107,7 +117,7 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
 2. Open the **Run on Runpod** sidebar panel (cloud icon on the left)
 3. Click **Run** to submit the workflow
 4. Track progress in the job list:
-   - **preparing** — validating credentials, uploading models/inputs
+   - **preparing** — validating credentials, waiting for worker, checking custom nodes, uploading models/inputs
    - **queued** — waiting for a RunPod worker
    - **running** — workflow is executing
    - **completed** — outputs downloaded to your local ComfyUI output directory
@@ -143,7 +153,7 @@ The worker has zero storage configuration — the network volume is mounted loca
 
 - **Job completes but no output appears locally** — Check the ComfyUI console log for download errors. Common causes: S3 credentials don't have read access, or the output path on the network volume doesn't match what the worker wrote.
 
-- **Missing custom nodes** — If the workflow uses nodes not installed in the worker Docker image, the job will fail with a `prompt_outputs_failed_validation` error listing the unknown node types. Add the missing nodes to `worker/custom_nodes.txt` and rebuild the image.
+- **Missing custom nodes** — The plugin checks node compatibility before each submission. If your workflow uses nodes not available on the worker, the job card will show a failed status listing the missing nodes. Add the missing nodes to `worker/custom_nodes.txt` and rebuild the image.
 
 - **Missing models** — If a model file (checkpoint, LoRA, VAE, text encoder) isn't on the network volume, ComfyUI will reject the workflow with a `value_not_in_list` error. Upload the model to the correct subdirectory under `models/` on the network volume.
 
