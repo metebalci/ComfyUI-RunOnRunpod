@@ -5,7 +5,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-from .s3_utils import get_s3_client, upload_file, upload_file_dedup, download_file, delete_objects, key_exists
+from .s3_utils import get_s3_client, upload_file, upload_file_dedup, download_file, delete_objects, list_objects, key_exists
 
 _PREFIX = "[RunOnRunpod]"
 
@@ -431,3 +431,26 @@ async def cancel_job(request):
     return web.json_response({
         "status": result.get("status", "CANCELLED"),
     })
+
+
+@routes.post("/RunOnRunpod/clean")
+async def clean_storage(request):
+    """Delete all objects under inputs/ or outputs/ prefix on S3."""
+    data = await request.json()
+    settings = data.get("settings", {})
+    folder = data.get("folder", "")
+
+    if folder not in ("inputs", "outputs"):
+        return web.json_response({"error": "Invalid folder"}, status=400)
+
+    try:
+        client = _make_s3_client(settings)
+        bucket = settings.get("bucketName", "")
+        keys = list_objects(client, bucket, f"{folder}/")
+        if keys:
+            delete_objects(client, bucket, keys)
+            print(_PREFIX, f"Cleaned {len(keys)} object(s) from {folder}/")
+        return web.json_response({"deleted": len(keys)})
+    except Exception as e:
+        print(_PREFIX, f"Clean error: {e}")
+        return web.json_response({"error": str(e)}, status=400)

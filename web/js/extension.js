@@ -108,51 +108,7 @@ app.registerExtension({
         // --- Inject CSS ---
         const style = document.createElement("style");
         style.textContent = `
-            .runpod-btn-wrapper {
-                display: flex;
-                align-items: center;
-                gap: 4px;
-                height: 100%;
-                position: relative;
-            }
-            .runpod-btn {
-                padding: 4px 12px;
-                border: none;
-                border-radius: 8px;
-                cursor: pointer;
-                font-size: 14px;
-                font-weight: 300;
-                font-family: Inter, sans-serif;
-                background: #4a9a5c;
-                color: #fff;
-                transition: background 0.3s;
-                height: 32px;
-                display: inline-flex;
-                align-items: center;
-            }
-            .runpod-btn:hover {
-                opacity: 0.85;
-            }
-            .runpod-btn.preparing {
-                background: #17a2b8;
-                color: #fff;
-                animation: runpod-pulse 1.5s ease-in-out infinite;
-            }
-            .runpod-btn.queued {
-                background: #f0ad4e;
-                color: #000;
-            }
-            .runpod-btn.running {
-                background: #337ab7;
-                color: #fff;
-                animation: runpod-pulse 1.5s ease-in-out infinite;
-            }
-            @keyframes runpod-pulse {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.6; }
-            }
             .runpod-panel {
-                display: none;
                 position: absolute;
                 top: calc(100% + 4px);
                 right: 0;
@@ -168,29 +124,46 @@ app.registerExtension({
                 font-size: 13px;
                 color: #ddd;
             }
-            .runpod-panel.open {
-                display: block;
-            }
             .runpod-panel-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
                 padding: 8px 12px;
                 border-bottom: 1px solid #333;
-            }
-            .runpod-panel-title {
                 font-weight: 600;
             }
-            .runpod-panel-close {
-                background: none;
-                border: none;
-                color: #888;
-                cursor: pointer;
-                font-size: 16px;
-                padding: 0 4px;
+            .runpod-panel-actions {
+                display: flex;
+                gap: 8px;
+                padding: 8px 12px;
             }
-            .runpod-panel-close:hover {
+            .runpod-panel-btn {
+                padding: 4px 12px;
+                border: 1px solid #555;
+                border-radius: 4px;
+                background: #2a2a2a;
+                color: #ccc;
+                cursor: pointer;
+                font-size: 12px;
+            }
+            .runpod-panel-btn:hover:not(:disabled) {
+                background: #3a3a3a;
                 color: #fff;
+            }
+            .runpod-panel-btn:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+            .runpod-panel-btn.run {
+                background: #2a6e2a;
+                border-color: #3a8e3a;
+            }
+            .runpod-panel-btn.run:hover:not(:disabled) {
+                background: #3a8e3a;
+            }
+            .runpod-panel-btn.cancel {
+                background: #6e2a2a;
+                border-color: #8e3a3a;
+            }
+            .runpod-panel-btn.cancel:hover:not(:disabled) {
+                background: #8e3a3a;
             }
             .runpod-panel-detail {
                 padding: 8px 12px;
@@ -216,92 +189,147 @@ app.registerExtension({
         `;
         document.head.appendChild(style);
 
-        // --- Create button ---
+        // --- Create panel ---
         const wrapper = document.createElement("div");
-        wrapper.className = "runpod-btn-wrapper";
+        wrapper.style.position = "relative";
+        wrapper.style.display = "flex";
+        wrapper.style.alignItems = "center";
+        wrapper.style.height = "100%";
 
-        const btn = document.createElement("button");
-        btn.textContent = "Run on RunPod";
-        btn.className = "runpod-btn";
-        btn.title = "Run on RunPod";
-
-        wrapper.appendChild(btn);
-
-        // --- Create status panel ---
         const panel = document.createElement("div");
         panel.className = "runpod-panel";
 
+        // Header
         const panelHeader = document.createElement("div");
         panelHeader.className = "runpod-panel-header";
+        panelHeader.textContent = "Run on RunPod";
 
-        const panelTitle = document.createElement("span");
-        panelTitle.className = "runpod-panel-title";
-        panelTitle.textContent = "Run on RunPod";
+        // Row 1: Run | Cancel
+        const row1 = document.createElement("div");
+        row1.className = "runpod-panel-actions";
 
-        const panelClose = document.createElement("button");
-        panelClose.className = "runpod-panel-close";
-        panelClose.textContent = "\u00d7";
-        panelClose.addEventListener("click", (e) => {
-            e.stopPropagation();
-            panel.classList.remove("open");
-        });
+        const runBtn = document.createElement("button");
+        runBtn.className = "runpod-panel-btn run";
+        runBtn.textContent = "Run";
 
-        panelHeader.appendChild(panelTitle);
-        panelHeader.appendChild(panelClose);
+        const cancelBtn = document.createElement("button");
+        cancelBtn.className = "runpod-panel-btn cancel";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.disabled = true;
 
+        row1.appendChild(runBtn);
+        row1.appendChild(cancelBtn);
+
+        // Row 2: Clean Inputs | Clean Outputs
+        const row2 = document.createElement("div");
+        row2.className = "runpod-panel-actions";
+
+        const cleanInputsBtn = document.createElement("button");
+        cleanInputsBtn.className = "runpod-panel-btn";
+        cleanInputsBtn.textContent = "Clean Inputs";
+
+        const cleanOutputsBtn = document.createElement("button");
+        cleanOutputsBtn.className = "runpod-panel-btn";
+        cleanOutputsBtn.textContent = "Clean Outputs";
+
+        row2.appendChild(cleanInputsBtn);
+        row2.appendChild(cleanOutputsBtn);
+
+        // Status detail
         const panelDetail = document.createElement("div");
         panelDetail.className = "runpod-panel-detail";
 
+        // Gallery
         const panelGallery = document.createElement("div");
         panelGallery.className = "runpod-panel-gallery";
 
         panel.appendChild(panelHeader);
+        panel.appendChild(row1);
+        panel.appendChild(row2);
         panel.appendChild(panelDetail);
         panel.appendChild(panelGallery);
         wrapper.appendChild(panel);
 
-        // Close panel on click outside
-        document.addEventListener("click", (e) => {
-            if (!wrapper.contains(e.target)) {
-                panel.classList.remove("open");
+        // --- Panel helpers ---
+        const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
+        const VIDEO_EXTS = [".mp4", ".webm"];
+        const AUDIO_EXTS = [".mp3", ".wav", ".ogg", ".flac"];
+
+        function findPreview(gallery) {
+            for (const exts of [IMAGE_EXTS, VIDEO_EXTS, AUDIO_EXTS]) {
+                const found = gallery.find(p => {
+                    const ext = p.substring(p.lastIndexOf(".")).toLowerCase();
+                    return exts.includes(ext);
+                });
+                if (found) return found;
             }
-        });
+            return null;
+        }
 
         function showPanel(statusText, detailText = "", gallery = []) {
             panelDetail.textContent = detailText ? `${statusText}: ${detailText}` : statusText;
             panelGallery.innerHTML = "";
-            for (const relPath of gallery) {
-                const parts = relPath.split("/");
-                const filename = parts.pop();
-                const subfolder = parts.join("/");
+
+            const previewable = findPreview(gallery);
+            if (!previewable) return;
+
+            const parts = previewable.split("/");
+            const filename = parts.pop();
+            const subfolder = parts.join("/");
+            const ext = filename.substring(filename.lastIndexOf(".")).toLowerCase();
+            const src = `/view?filename=${encodeURIComponent(filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`;
+
+            if (IMAGE_EXTS.includes(ext)) {
                 const img = document.createElement("img");
-                img.src = `/view?filename=${encodeURIComponent(filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`;
+                img.src = src;
                 panelGallery.appendChild(img);
+            } else if (VIDEO_EXTS.includes(ext)) {
+                const video = document.createElement("video");
+                video.src = src;
+                video.controls = true;
+                video.style.maxWidth = "100%";
+                video.style.borderRadius = "4px";
+                panelGallery.appendChild(video);
+            } else if (AUDIO_EXTS.includes(ext)) {
+                const audio = document.createElement("audio");
+                audio.src = src;
+                audio.controls = true;
+                audio.style.width = "100%";
+                panelGallery.appendChild(audio);
             }
-            panel.classList.add("open");
         }
+
+        async function cleanFolder(folder) {
+            if (!confirm(`Delete all files from ${folder}/ on S3?`)) return;
+            try {
+                panelDetail.textContent = `Cleaning ${folder}...`;
+                const res = await api.fetchApi("/RunOnRunpod/clean", {
+                    method: "POST",
+                    body: JSON.stringify({ folder, settings: getSettings() }),
+                });
+                const data = await res.json();
+                if (data.error) {
+                    panelDetail.textContent = `Clean failed: ${data.error}`;
+                } else {
+                    panelDetail.textContent = `Deleted ${data.deleted} file(s) from ${folder}/`;
+                }
+            } catch (err) {
+                panelDetail.textContent = `Clean failed: ${err}`;
+            }
+        }
+
+        cleanInputsBtn.addEventListener("click", () => cleanFolder("inputs"));
+        cleanOutputsBtn.addEventListener("click", () => cleanFolder("outputs"));
 
         // --- State management ---
         function setState(state) {
             currentState = state;
-            btn.classList.remove("preparing", "queued", "running");
+            const busy = state !== STATE.IDLE;
 
-            switch (state) {
-                case STATE.IDLE:
-                    break;
-                case STATE.PREPARING:
-                    btn.classList.add("preparing");
-                    showPanel("Preparing...", "Uploading models and inputs");
-                    break;
-                case STATE.QUEUED:
-                    btn.classList.add("queued");
-                    showPanel("Queued on RunPod...");
-                    break;
-                case STATE.RUNNING:
-                    btn.classList.add("running");
-                    showPanel("Running...");
-                    break;
-            }
+            runBtn.disabled = busy;
+            cancelBtn.disabled = !busy;
+            cleanInputsBtn.disabled = busy;
+            cleanOutputsBtn.disabled = busy;
         }
 
         // --- Download outputs and cleanup ---
@@ -332,6 +360,7 @@ app.registerExtension({
         // --- Polling ---
         function startPolling(jobId) {
             setState(STATE.QUEUED);
+            showPanel("Queued on RunPod...");
             pollInterval = setInterval(async () => {
                 try {
                     const res = await api.fetchApi("/RunOnRunpod/status", {
@@ -342,6 +371,7 @@ app.registerExtension({
 
                     if (data.status === "IN_PROGRESS") {
                         setState(STATE.RUNNING);
+                        showPanel("Running...");
                     } else if (data.status === "COMPLETED") {
                         stopPolling();
                         console.log(`[RunOnRunpod] Job completed, output:`, data.output);
@@ -382,70 +412,73 @@ app.registerExtension({
             sessionStorage.removeItem("runpod_input_files");
         }
 
-        // --- Click handler: submit or cancel ---
-        btn.addEventListener("click", async () => {
-            if (currentState === STATE.IDLE) {
-                // Quick local check first
-                const s = getSettings();
-                const missing = [];
-                if (!s.apiKey) missing.push("API Key");
-                if (!s.endpointId) missing.push("Endpoint ID");
-                if (!s.s3AccessKey) missing.push("S3 Access Key");
-                if (!s.s3SecretKey) missing.push("S3 Secret Key");
-                if (!s.endpointUrl) missing.push("Endpoint URL");
-                if (!s.bucketName) missing.push("Bucket Name");
-                if (missing.length > 0) {
-                    console.error("[RunOnRunpod] Missing settings:", missing.join(", "));
-                    showPanel("Failed", `Missing settings: ${missing.join(", ")}`);
+        // --- Submit job ---
+        async function submitJob() {
+            if (currentState !== STATE.IDLE) return;
+
+            const s = getSettings();
+            const missing = [];
+            if (!s.apiKey) missing.push("API Key");
+            if (!s.endpointId) missing.push("Endpoint ID");
+            if (!s.s3AccessKey) missing.push("S3 Access Key");
+            if (!s.s3SecretKey) missing.push("S3 Secret Key");
+            if (!s.endpointUrl) missing.push("Endpoint URL");
+            if (!s.bucketName) missing.push("Bucket Name");
+            if (missing.length > 0) {
+                console.error("[RunOnRunpod] Missing settings:", missing.join(", "));
+                showPanel("Failed", `Missing settings: ${missing.join(", ")}`);
+                return;
+            }
+
+            setState(STATE.PREPARING);
+            showPanel("Preparing...", "Uploading models and inputs");
+
+            try {
+                const prompt = await app.graphToPrompt();
+
+                const res = await api.fetchApi("/RunOnRunpod/submit", {
+                    method: "POST",
+                    body: JSON.stringify({ workflow: prompt.output, settings: getSettings() }),
+                });
+                const data = await res.json();
+
+                if (data.error) {
+                    console.error("[RunOnRunpod] Submit error:", data.error);
+                    showPanel("Failed", data.error);
                     setState(STATE.IDLE);
                     return;
                 }
 
-                // Immediately show we're preparing
-                setState(STATE.PREPARING);
-
-                // Submit
-                try {
-                    const prompt = await app.graphToPrompt();
-
-                    const res = await api.fetchApi("/RunOnRunpod/submit", {
-                        method: "POST",
-                        body: JSON.stringify({ workflow: prompt.output, settings: getSettings() }),
-                    });
-                    const data = await res.json();
-
-                    if (data.error) {
-                        console.error("[RunOnRunpod] Submit error:", data.error);
-                        showPanel("Failed", data.error);
-                        setState(STATE.IDLE);
-                        return;
-                    }
-
-                    currentJobId = data.job_id;
-                    currentInputFiles = data.input_files || {};
-                    sessionStorage.setItem("runpod_job_id", currentJobId);
-                    sessionStorage.setItem("runpod_input_files", JSON.stringify(currentInputFiles));
-                    startPolling(currentJobId);
-                } catch (err) {
-                    console.error("[RunOnRunpod] Submit error:", err);
-                    showPanel("Failed", String(err));
-                    setState(STATE.IDLE);
-                }
-            } else if (currentState === STATE.QUEUED || currentState === STATE.RUNNING) {
-                // Cancel
-                if (!currentJobId) return;
-                try {
-                    await api.fetchApi("/RunOnRunpod/cancel", {
-                        method: "POST",
-                        body: JSON.stringify({ job_id: currentJobId, settings: getSettings() }),
-                    });
-                } catch (err) {
-                    console.error("[RunOnRunpod] Cancel error:", err);
-                }
-                stopPolling();
+                currentJobId = data.job_id;
+                currentInputFiles = data.input_files || {};
+                sessionStorage.setItem("runpod_job_id", currentJobId);
+                sessionStorage.setItem("runpod_input_files", JSON.stringify(currentInputFiles));
+                startPolling(currentJobId);
+            } catch (err) {
+                console.error("[RunOnRunpod] Submit error:", err);
+                showPanel("Failed", String(err));
                 setState(STATE.IDLE);
             }
-        });
+        }
+
+        // --- Cancel job ---
+        async function cancelJob() {
+            if (!currentJobId) return;
+            try {
+                await api.fetchApi("/RunOnRunpod/cancel", {
+                    method: "POST",
+                    body: JSON.stringify({ job_id: currentJobId, settings: getSettings() }),
+                });
+            } catch (err) {
+                console.error("[RunOnRunpod] Cancel error:", err);
+            }
+            stopPolling();
+            showPanel("Cancelled");
+            setState(STATE.IDLE);
+        }
+
+        runBtn.addEventListener("click", submitJob);
+        cancelBtn.addEventListener("click", cancelJob);
 
         // --- Resume polling on page reload ---
         const savedJobId = sessionStorage.getItem("runpod_job_id");
@@ -459,8 +492,8 @@ app.registerExtension({
             startPolling(savedJobId);
         }
 
-        // --- Insert button into menu ---
-        const insertButton = () => {
+        // --- Insert panel into menu ---
+        const insertPanel = () => {
             const actionbar = document.querySelector(".actionbar-container");
             if (actionbar) {
                 actionbar.appendChild(wrapper);
@@ -469,9 +502,9 @@ app.registerExtension({
             return false;
         };
 
-        if (!insertButton()) {
+        if (!insertPanel()) {
             const observer = new MutationObserver(() => {
-                if (insertButton()) {
+                if (insertPanel()) {
                     observer.disconnect();
                 }
             });
