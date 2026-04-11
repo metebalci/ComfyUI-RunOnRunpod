@@ -1,5 +1,6 @@
 import hashlib
 import os
+import time
 
 import boto3
 from botocore.config import Config
@@ -37,8 +38,28 @@ def key_exists(client, bucket: str, key: str) -> bool:
         return False
 
 
+class _UploadProgress:
+    def __init__(self, file_path: str, key: str, interval: float = 5.0):
+        self._total = os.path.getsize(file_path)
+        self._key = key
+        self._uploaded = 0
+        self._last_log = 0.0
+        self._interval = interval
+
+    def __call__(self, bytes_amount):
+        self._uploaded += bytes_amount
+        now = time.monotonic()
+        if now - self._last_log >= self._interval:
+            pct = self._uploaded / self._total * 100 if self._total else 100
+            mb_done = self._uploaded / (1024 * 1024)
+            mb_total = self._total / (1024 * 1024)
+            print(f"[RunOnRunpod] Uploading {self._key}: {mb_done:.0f}/{mb_total:.0f} MB ({pct:.0f}%)")
+            self._last_log = now
+
+
 def upload_file(client, bucket: str, key: str, file_path: str):
-    client.upload_file(file_path, bucket, key)
+    callback = _UploadProgress(file_path, key)
+    client.upload_file(file_path, bucket, key, Callback=callback)
 
 
 def download_file(client, bucket: str, key: str, dest: str):
