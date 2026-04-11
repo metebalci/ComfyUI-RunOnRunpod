@@ -39,7 +39,7 @@ Create a RunPod network volume and set up the following directory structure:
 /outputs/        # Output files (written by the worker)
 ```
 
-Upload models to the network volume using AWS CLI or any S3-compatible client with RunPod's S3 API credentials.
+Models are automatically uploaded to the network volume when you submit a workflow (if "Upload missing models automatically" is enabled). You can also upload models manually using AWS CLI or any S3-compatible client with RunPod's S3 API credentials.
 
 ### 2. Prepare the worker
 
