@@ -20,53 +20,57 @@ app.registerExtension({
 
     // ComfyUI renders settings in reverse order — last in array appears first in UI
     settings: [
+        // Job (bottom in UI)
         {
-            id: "Run on Runpod.Runpod.deleteOutputsAfterJob",
+            id: "Run on Runpod.Job.deleteOutputsAfterJob",
             name: "Delete outputs from network volume after job",
             type: "boolean",
             defaultValue: true,
         },
         {
-            id: "Run on Runpod.Runpod.deleteInputsAfterJob",
+            id: "Run on Runpod.Job.deleteInputsAfterJob",
             name: "Delete inputs from network volume after job",
             type: "boolean",
             defaultValue: false,
         },
+        // Keys
         {
-            id: "Run on Runpod.Runpod.apiKey",
+            id: "Run on Runpod.Keys.apiKey",
             name: "API Key",
             type: "text",
             defaultValue: "",
             attrs: { type: "password" },
         },
         {
-            id: "Run on Runpod.Runpod.s3SecretKey",
+            id: "Run on Runpod.Keys.s3SecretKey",
             name: "S3 Secret Key",
             type: "text",
             defaultValue: "",
             attrs: { type: "password" },
         },
         {
-            id: "Run on Runpod.Runpod.s3AccessKey",
+            id: "Run on Runpod.Keys.s3AccessKey",
             name: "S3 Access Key",
             type: "text",
             defaultValue: "",
         },
+        // Storage
         {
-            id: "Run on Runpod.Runpod.endpointId",
-            name: "Endpoint ID",
-            type: "text",
-            defaultValue: "",
-        },
-        {
-            id: "Run on Runpod.Runpod.bucketName",
+            id: "Run on Runpod.Storage.bucketName",
             name: "Bucket Name",
             type: "text",
             defaultValue: "",
         },
         {
-            id: "Run on Runpod.Runpod.s3Endpoint",
+            id: "Run on Runpod.Storage.s3Endpoint",
             name: "S3 Endpoint URL",
+            type: "text",
+            defaultValue: "",
+        },
+        // Serverless (top in UI)
+        {
+            id: "Run on Runpod.Serverless.endpointId",
+            name: "Endpoint ID",
             type: "text",
             defaultValue: "",
         },
@@ -77,14 +81,14 @@ app.registerExtension({
         // --- Helper to gather current settings ---
         function getSettings() {
             return {
-                apiKey: app.extensionManager.setting.get("Run on Runpod.Runpod.apiKey") || "",
-                endpointId: app.extensionManager.setting.get("Run on Runpod.Runpod.endpointId") || "",
-                s3AccessKey: app.extensionManager.setting.get("Run on Runpod.Runpod.s3AccessKey") || "",
-                s3SecretKey: app.extensionManager.setting.get("Run on Runpod.Runpod.s3SecretKey") || "",
-                s3Endpoint: app.extensionManager.setting.get("Run on Runpod.Runpod.s3Endpoint") || "",
-                bucketName: app.extensionManager.setting.get("Run on Runpod.Runpod.bucketName") || "",
-                deleteInputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Runpod.deleteInputsAfterJob") ?? false,
-                deleteOutputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Runpod.deleteOutputsAfterJob") ?? true,
+                apiKey: app.extensionManager.setting.get("Run on Runpod.Keys.apiKey") || "",
+                endpointId: app.extensionManager.setting.get("Run on Runpod.Serverless.endpointId") || "",
+                s3AccessKey: app.extensionManager.setting.get("Run on Runpod.Keys.s3AccessKey") || "",
+                s3SecretKey: app.extensionManager.setting.get("Run on Runpod.Keys.s3SecretKey") || "",
+                s3Endpoint: app.extensionManager.setting.get("Run on Runpod.Storage.s3Endpoint") || "",
+                bucketName: app.extensionManager.setting.get("Run on Runpod.Storage.bucketName") || "",
+                deleteInputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteInputsAfterJob") ?? false,
+                deleteOutputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteOutputsAfterJob") ?? true,
             };
         }
 
