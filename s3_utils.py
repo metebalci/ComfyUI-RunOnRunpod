@@ -7,7 +7,7 @@ from botocore.exceptions import ClientError
 
 
 def get_s3_client(settings: dict):
-    endpoint_url = settings.get("s3_endpoint") or None
+    endpoint_url = settings.get("endpoint_url") or None
     return boto3.client(
         "s3",
         endpoint_url=endpoint_url,

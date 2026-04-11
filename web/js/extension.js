@@ -85,7 +85,7 @@ app.registerExtension({
                 endpointId: app.extensionManager.setting.get("Run on Runpod.Serverless.endpointId") || "",
                 s3AccessKey: app.extensionManager.setting.get("Run on Runpod.Keys.s3AccessKey") || "",
                 s3SecretKey: app.extensionManager.setting.get("Run on Runpod.Keys.s3SecretKey") || "",
-                s3Endpoint: app.extensionManager.setting.get("Run on Runpod.Storage.endpointUrl") || "",
+                endpointUrl: app.extensionManager.setting.get("Run on Runpod.Storage.endpointUrl") || "",
                 bucketName: app.extensionManager.setting.get("Run on Runpod.Storage.bucketName") || "",
                 deleteInputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteInputsAfterJob") ?? false,
                 deleteOutputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteOutputsAfterJob") ?? true,
@@ -259,7 +259,7 @@ app.registerExtension({
                 if (!s.endpointId) missing.push("Endpoint ID");
                 if (!s.s3AccessKey) missing.push("S3 Access Key");
                 if (!s.s3SecretKey) missing.push("S3 Secret Key");
-                if (!s.s3Endpoint) missing.push("S3 Endpoint URL");
+                if (!s.endpointUrl) missing.push("Endpoint URL");
                 if (!s.bucketName) missing.push("Bucket Name");
                 if (missing.length > 0) {
                     console.error("[RunOnRunpod] Missing settings:", missing.join(", "));

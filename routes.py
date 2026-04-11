@@ -66,7 +66,7 @@ def _scan_input_files(workflow: dict) -> dict:
 def _make_s3_client(settings: dict):
     """Create S3 client from settings."""
     return get_s3_client({
-        "s3_endpoint": settings.get("s3Endpoint"),
+        "endpoint_url": settings.get("endpointUrl"),
         "s3_access_key": settings.get("s3AccessKey"),
         "s3_secret_key": settings.get("s3SecretKey"),
     })
@@ -108,8 +108,8 @@ async def verify_settings(request):
     bucket = settings.get("bucketName", "")
     s3_access = settings.get("s3AccessKey", "")
     s3_secret = settings.get("s3SecretKey", "")
-    s3_endpoint = settings.get("s3Endpoint", "")
-    if not bucket or not s3_access or not s3_secret or not s3_endpoint:
+    endpoint_url = settings.get("endpointUrl", "")
+    if not bucket or not s3_access or not s3_secret or not endpoint_url:
         results["errors"].append("S3 credentials, endpoint URL, and bucket name are required")
     else:
         try:
@@ -144,9 +144,9 @@ async def submit_job(request):
     bucket = settings.get("bucketName", "")
     s3_access = settings.get("s3AccessKey", "")
     s3_secret = settings.get("s3SecretKey", "")
-    s3_endpoint = settings.get("s3Endpoint", "")
+    endpoint_url = settings.get("endpointUrl", "")
 
-    if not bucket or not s3_access or not s3_secret or not s3_endpoint:
+    if not bucket or not s3_access or not s3_secret or not endpoint_url:
         print(_PREFIX,"S3 credentials, endpoint URL, and bucket name are required")
         return web.json_response(
             {"error": "S3 credentials, endpoint URL, and bucket name are required"}, status=400
