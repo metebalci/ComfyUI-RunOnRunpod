@@ -5,7 +5,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-from .s3_utils import get_s3_client, upload_file_dedup, download_file, delete_objects
+from .s3_utils import get_s3_client, upload_file, upload_file_dedup, download_file, delete_objects, key_exists
 
 _PREFIX = "[RunOnRunpod]"
 
@@ -20,6 +20,22 @@ INPUT_NODE_FIELDS = {
     "LoadVideo": "video",
     "LoadAudio": "audio",
     "VHS_LoadVideo": "video",
+}
+
+# Model loader node types: class_type -> (field_name, model_subdirectory)
+MODEL_NODE_FIELDS = {
+    "CheckpointLoaderSimple": ("ckpt_name", "checkpoints"),
+    "CheckpointLoader": ("ckpt_name", "checkpoints"),
+    "LoraLoader": ("lora_name", "loras"),
+    "LoraLoaderModelOnly": ("lora_name", "loras"),
+    "VAELoader": ("vae_name", "vae"),
+    "CLIPLoader": ("clip_name", "text_encoders"),
+    "DualCLIPLoader": [("clip_name1", "text_encoders"), ("clip_name2", "text_encoders")],
+    "TripleCLIPLoader": [("clip_name1", "text_encoders"), ("clip_name2", "text_encoders"), ("clip_name3", "text_encoders")],
+    "UNETLoader": ("unet_name", "diffusion_models"),
+    "ControlNetLoader": ("control_net_name", "controlnet"),
+    "CLIPVisionLoader": ("clip_name", "clip_vision"),
+    "UpscaleModelLoader": ("model_name", "upscale_models"),
 }
 
 
@@ -48,6 +64,41 @@ def _get_output_directory() -> str:
             "..",
             "output",
         )
+
+
+def _get_models_directory() -> str:
+    """Return ComfyUI's models directory path."""
+    try:
+        import folder_paths
+        return folder_paths.models_dir
+    except (ImportError, AttributeError):
+        return os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "..",
+            "models",
+        )
+
+
+def _scan_model_files(workflow: dict) -> dict:
+    """Scan workflow for nodes that reference model files.
+
+    Returns dict: {(subdir, filename): node_id}
+    """
+    files = {}
+    for node_id, node in workflow.items():
+        class_type = node.get("class_type", "")
+        fields = MODEL_NODE_FIELDS.get(class_type)
+        if fields is None:
+            continue
+        # Normalize to list of (field, subdir) tuples
+        if isinstance(fields, tuple):
+            fields = [fields]
+        inputs = node.get("inputs", {})
+        for field_name, subdir in fields:
+            filename = inputs.get(field_name)
+            if isinstance(filename, str) and filename:
+                files[(subdir, filename)] = node_id
+    return files
 
 
 def _scan_input_files(workflow: dict) -> dict:
@@ -198,6 +249,23 @@ async def submit_job(request):
                 )
             s3_key = upload_file_dedup(client, bucket, file_path)
             input_files[filename] = s3_key
+
+    # Upload missing models to network volume
+    if settings.get("uploadMissingModels", True):
+        model_refs = _scan_model_files(workflow)
+        if model_refs:
+            models_dir = _get_models_directory()
+            for (subdir, filename) in model_refs:
+                s3_key = f"models/{subdir}/{filename}"
+                if not key_exists(client, bucket, s3_key):
+                    local_path = os.path.join(models_dir, subdir, filename)
+                    if os.path.exists(local_path):
+                        print(_PREFIX, f"Uploading missing model: {local_path} -> {s3_key}")
+                        upload_file(client, bucket, s3_key, local_path)
+                    else:
+                        print(_PREFIX, f"Model not found locally: {local_path}")
+                else:
+                    print(_PREFIX, f"Model already on volume: {s3_key}")
 
     # Submit to RunPod
     payload = {

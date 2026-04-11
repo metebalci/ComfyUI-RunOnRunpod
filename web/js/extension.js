@@ -22,6 +22,12 @@ app.registerExtension({
     settings: [
         // Job (bottom in UI)
         {
+            id: "Run on Runpod.Job.uploadMissingModels",
+            name: "Upload missing models automatically",
+            type: "boolean",
+            defaultValue: true,
+        },
+        {
             id: "Run on Runpod.Job.deleteOutputsAfterJob",
             name: "Delete outputs from network volume after job",
             type: "boolean",
@@ -96,6 +102,7 @@ app.registerExtension({
                 bucketName: app.extensionManager.setting.get("Run on Runpod.Storage.bucketName") || "",
                 deleteInputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteInputsAfterJob") ?? false,
                 deleteOutputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteOutputsAfterJob") ?? true,
+                uploadMissingModels: app.extensionManager.setting.get("Run on Runpod.Job.uploadMissingModels") ?? true,
             };
         }
 
