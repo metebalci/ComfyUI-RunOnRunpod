@@ -18,6 +18,7 @@ let pollInterval = null;
 app.registerExtension({
     name: "RunOnRunpod",
 
+    // ComfyUI renders settings in reverse order — last in array appears first in UI
     settings: [
         {
             id: "Run on Runpod.Runpod.deleteOutputsAfterJob",
