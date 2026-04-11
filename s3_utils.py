@@ -42,15 +42,16 @@ def upload_file(client, bucket: str, key: str, file_path: str):
 def download_file(client, bucket: str, key: str, dest: str):
     """Download an object from S3 to a local path."""
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    client.download_file(bucket, key, dest)
+    resp = client.get_object(Bucket=bucket, Key=key)
+    with open(dest, "wb") as f:
+        for chunk in resp["Body"].iter_chunks(8192):
+            f.write(chunk)
 
 
 def delete_objects(client, bucket: str, keys: list[str]):
     """Delete a list of S3 keys from the bucket."""
-    if not keys:
-        return
-    objects = [{"Key": k} for k in keys]
-    client.delete_objects(Bucket=bucket, Delete={"Objects": objects})
+    for key in keys:
+        client.delete_object(Bucket=bucket, Key=key)
 
 
 def list_objects(client, bucket: str, prefix: str) -> list[str]:
