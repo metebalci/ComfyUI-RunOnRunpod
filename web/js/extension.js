@@ -115,6 +115,7 @@ app.registerExtension({
                 align-items: center;
                 gap: 4px;
                 height: 100%;
+                position: relative;
             }
             .runpod-btn {
                 padding: 4px 12px;
@@ -160,6 +161,68 @@ app.registerExtension({
                 0%, 100% { opacity: 1; }
                 50% { opacity: 0.6; }
             }
+            .runpod-panel {
+                display: none;
+                position: absolute;
+                top: calc(100% + 4px);
+                right: 0;
+                width: 320px;
+                max-height: 400px;
+                overflow-y: auto;
+                background: #1e1e1e;
+                border: 1px solid #444;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+                z-index: 1000;
+                font-family: Inter, sans-serif;
+                font-size: 13px;
+                color: #ddd;
+            }
+            .runpod-panel.open {
+                display: block;
+            }
+            .runpod-panel-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 8px 12px;
+                border-bottom: 1px solid #333;
+            }
+            .runpod-panel-status {
+                font-weight: 500;
+            }
+            .runpod-panel-close {
+                background: none;
+                border: none;
+                color: #888;
+                cursor: pointer;
+                font-size: 16px;
+                padding: 0 4px;
+            }
+            .runpod-panel-close:hover {
+                color: #fff;
+            }
+            .runpod-panel-detail {
+                padding: 8px 12px;
+                color: #aaa;
+                font-size: 12px;
+            }
+            .runpod-panel-detail:empty {
+                display: none;
+            }
+            .runpod-panel-gallery {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 4px;
+                padding: 8px 12px;
+            }
+            .runpod-panel-gallery:empty {
+                display: none;
+            }
+            .runpod-panel-gallery img {
+                max-width: 100%;
+                border-radius: 4px;
+            }
         `;
         document.head.appendChild(style);
 
@@ -174,28 +237,91 @@ app.registerExtension({
 
         wrapper.appendChild(btn);
 
+        // --- Create status panel ---
+        const panel = document.createElement("div");
+        panel.className = "runpod-panel";
+
+        const panelHeader = document.createElement("div");
+        panelHeader.className = "runpod-panel-header";
+
+        const panelStatus = document.createElement("span");
+        panelStatus.className = "runpod-panel-status";
+
+        const panelClose = document.createElement("button");
+        panelClose.className = "runpod-panel-close";
+        panelClose.textContent = "\u00d7";
+        panelClose.addEventListener("click", (e) => {
+            e.stopPropagation();
+            panel.classList.remove("open");
+        });
+
+        panelHeader.appendChild(panelStatus);
+        panelHeader.appendChild(panelClose);
+
+        const panelDetail = document.createElement("div");
+        panelDetail.className = "runpod-panel-detail";
+
+        const panelGallery = document.createElement("div");
+        panelGallery.className = "runpod-panel-gallery";
+
+        panel.appendChild(panelHeader);
+        panel.appendChild(panelDetail);
+        panel.appendChild(panelGallery);
+        wrapper.appendChild(panel);
+
+        // Close panel on click outside
+        document.addEventListener("click", (e) => {
+            if (!wrapper.contains(e.target)) {
+                panel.classList.remove("open");
+            }
+        });
+
+        function showPanel(statusText, detailText = "", gallery = []) {
+            panelStatus.textContent = statusText;
+            panelDetail.textContent = detailText;
+            panelGallery.innerHTML = "";
+            for (const filename of gallery) {
+                const img = document.createElement("img");
+                img.src = `/view?filename=${encodeURIComponent(filename)}&type=output`;
+                panelGallery.appendChild(img);
+            }
+            panel.classList.add("open");
+        }
+
+        function hidePanel() {
+            panel.classList.remove("open");
+        }
+
         // --- State management ---
-        function setState(state) {
+        function setState(state, extra = {}) {
             currentState = state;
             btn.classList.remove("preparing", "queued", "running", "completed", "failed");
 
             switch (state) {
+                case STATE.IDLE:
+                    hidePanel();
+                    break;
                 case STATE.PREPARING:
                     btn.classList.add("preparing");
+                    showPanel("Preparing...", "Uploading models and inputs");
                     break;
                 case STATE.QUEUED:
                     btn.classList.add("queued");
+                    showPanel("Queued on RunPod...");
                     break;
                 case STATE.RUNNING:
                     btn.classList.add("running");
+                    showPanel("Running...");
                     break;
                 case STATE.COMPLETED:
                     btn.classList.add("completed");
-                    setTimeout(() => setState(STATE.IDLE), 3000);
+                    showPanel("Completed", "", extra.gallery || []);
+                    setTimeout(() => setState(STATE.IDLE), 10000);
                     break;
                 case STATE.FAILED:
                     btn.classList.add("failed");
-                    setTimeout(() => setState(STATE.IDLE), 3000);
+                    showPanel("Failed", extra.error || "");
+                    setTimeout(() => setState(STATE.IDLE), 10000);
                     break;
             }
         }
@@ -218,8 +344,10 @@ app.registerExtension({
                 if (data.downloaded && data.downloaded.length > 0) {
                     console.log(`[RunOnRunpod] Downloaded ${data.downloaded.length} file(s) to local output directory`);
                 }
+                return data.downloaded || [];
             } catch (err) {
                 console.error("[RunOnRunpod] Download/cleanup error:", err);
+                return [];
             }
         }
 
@@ -240,8 +368,8 @@ app.registerExtension({
                         stopPolling();
                         console.log(`[RunOnRunpod] Job completed, output:`, data.output);
                         const outputFiles = data.output?.output_files || [];
-                        await handleJobEnd(outputFiles);
-                        setState(STATE.COMPLETED);
+                        const downloaded = await handleJobEnd(outputFiles);
+                        setState(STATE.COMPLETED, { gallery: downloaded });
                     } else if (
                         data.status === "FAILED" ||
                         data.status === "CANCELLED" ||
@@ -249,9 +377,10 @@ app.registerExtension({
                         data.status === "UNKNOWN"
                     ) {
                         stopPolling();
-                        console.error(`[RunOnRunpod] Job ${data.status}:`, data.error || "");
+                        const errorMsg = data.error || data.output?.error || `Job ${data.status}`;
+                        console.error(`[RunOnRunpod] ${errorMsg}`);
                         await handleJobEnd([]);
-                        setState(STATE.FAILED);
+                        setState(STATE.FAILED, { error: errorMsg });
                     }
                 } catch (err) {
                     console.error("[RunOnRunpod] Polling error:", err);
@@ -286,7 +415,7 @@ app.registerExtension({
                 if (!s.bucketName) missing.push("Bucket Name");
                 if (missing.length > 0) {
                     console.error("[RunOnRunpod] Missing settings:", missing.join(", "));
-                    setState(STATE.FAILED);
+                    setState(STATE.FAILED, { error: `Missing settings: ${missing.join(", ")}` });
                     return;
                 }
 
@@ -305,7 +434,7 @@ app.registerExtension({
 
                     if (data.error) {
                         console.error("[RunOnRunpod] Submit error:", data.error);
-                        setState(STATE.FAILED);
+                        setState(STATE.FAILED, { error: data.error });
                         return;
                     }
 
@@ -316,7 +445,7 @@ app.registerExtension({
                     startPolling(currentJobId);
                 } catch (err) {
                     console.error("[RunOnRunpod] Submit error:", err);
-                    setState(STATE.FAILED);
+                    setState(STATE.FAILED, { error: String(err) });
                 }
             } else if (currentState === STATE.QUEUED || currentState === STATE.RUNNING) {
                 // Cancel
