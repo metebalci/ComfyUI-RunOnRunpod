@@ -30,7 +30,12 @@ def queue_workflow(workflow: dict) -> str:
         f"{COMFY_URL}/prompt",
         json={"prompt": workflow},
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text
+        raise RuntimeError(f"ComfyUI rejected workflow (HTTP {resp.status_code}): {detail}")
     data = resp.json()
     if "error" in data:
         raise RuntimeError(f"ComfyUI rejected workflow: {data['error']}")
