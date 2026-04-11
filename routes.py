@@ -66,17 +66,23 @@ def _get_output_directory() -> str:
         )
 
 
-def _get_models_directory() -> str:
-    """Return ComfyUI's models directory path."""
+def _find_model_file(subdir: str, filename: str) -> str | None:
+    """Find a model file across all ComfyUI search paths for the given model type."""
     try:
         import folder_paths
-        return folder_paths.models_dir
+        paths = folder_paths.get_folder_paths(subdir)
+        for base in paths:
+            full_path = os.path.join(base, filename)
+            if os.path.exists(full_path):
+                return full_path
     except (ImportError, AttributeError):
-        return os.path.join(
+        fallback = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "..",
-            "models",
+            "..", "models", subdir, filename,
         )
+        if os.path.exists(fallback):
+            return fallback
+    return None
 
 
 def _scan_model_files(workflow: dict) -> dict:
@@ -254,16 +260,15 @@ async def submit_job(request):
     if settings.get("uploadMissingModels", True):
         model_refs = _scan_model_files(workflow)
         if model_refs:
-            models_dir = _get_models_directory()
             for (subdir, filename) in model_refs:
                 s3_key = f"models/{subdir}/{filename}"
                 if not key_exists(client, bucket, s3_key):
-                    local_path = os.path.join(models_dir, subdir, filename)
-                    if os.path.exists(local_path):
+                    local_path = _find_model_file(subdir, filename)
+                    if local_path:
                         print(_PREFIX, f"Uploading missing model: {local_path} -> {s3_key}")
                         upload_file(client, bucket, s3_key, local_path)
                     else:
-                        print(_PREFIX, f"Model not found locally: {local_path}")
+                        print(_PREFIX, f"Model not found locally: {subdir}/{filename}")
                 else:
                     print(_PREFIX, f"Model already on volume: {s3_key}")
 
