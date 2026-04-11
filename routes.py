@@ -208,6 +208,7 @@ async def submit_job(request):
     data = await request.json()
     settings = data.get("settings", {})
     workflow = data.get("workflow", {})
+    prep_id = data.get("prep_id", "")
 
     api_key = settings.get("apiKey", "")
     endpoint_id = settings.get("endpointId", "")
@@ -229,7 +230,7 @@ async def submit_job(request):
             {"error": "S3 credentials, endpoint URL, and bucket name are required"}, status=400
         )
 
-    _send_event("progress", {"message": "Validating credentials..."})
+    _send_event("progress", {"prep_id": prep_id, "message": "Validating credentials..."})
 
     # Validate RunPod API
     try:
@@ -275,7 +276,7 @@ async def submit_job(request):
                 return web.json_response(
                     {"error": f"Input file not found: {filename}"}, status=400
                 )
-            _send_event("progress", {"message": f"Uploading input: {filename}"})
+            _send_event("progress", {"prep_id": prep_id, "message": f"Uploading input: {filename}"})
             s3_key = await asyncio.to_thread(upload_file_dedup, client, bucket, file_path)
             input_files[filename] = s3_key
 
@@ -292,14 +293,15 @@ async def submit_job(request):
                 if not exists:
                     local_path = _find_model_file(subdir, filename)
                     if local_path:
-                        _send_event("progress", {"message": f"Uploading model: {filename}"})
+                        _send_event("progress", {"prep_id": prep_id, "message": f"Uploading model: {filename}"})
                         print(_PREFIX, f"Uploading missing model: {local_path} -> {s3_key}")
 
-                        def _model_progress(uploaded, total, _fn=filename):
+                        def _model_progress(uploaded, total, _fn=filename, _pid=prep_id):
                             pct = int(uploaded / total * 100) if total else 100
                             mb_done = uploaded / (1024 * 1024)
                             mb_total = total / (1024 * 1024)
                             _send_event("upload_progress", {
+                                "prep_id": _pid,
                                 "message": f"Uploading model: {_fn}",
                                 "percent": pct,
                                 "uploaded_mb": round(mb_done, 1),
@@ -312,7 +314,7 @@ async def submit_job(request):
                 else:
                     print(_PREFIX, f"Model already on volume: {s3_key}")
 
-    _send_event("progress", {"message": "Submitting to RunPod..."})
+    _send_event("progress", {"prep_id": prep_id, "message": "Submitting to RunPod..."})
 
     # Submit to RunPod
     payload = {
@@ -337,7 +339,7 @@ async def submit_job(request):
 
     job_id = result["id"]
     print(_PREFIX, f"Job submitted: {job_id}")
-    _send_event("queued", {"job_id": job_id})
+    _send_event("queued", {"job_id": job_id, "prep_id": prep_id})
 
     # Start background task to poll RunPod and handle completion
     task = asyncio.create_task(_poll_and_finish(job_id, settings, input_files))

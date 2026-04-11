@@ -197,15 +197,15 @@ async function submitJob() {
     }
 
     // Create a temporary job entry while preparing
-    const tempId = `prep-${Date.now()}`;
-    const job = addJob(tempId);
+    const prepId = crypto.randomUUID();
+    const job = addJob(prepId);
 
     try {
         const prompt = await app.graphToPrompt();
 
         const res = await api.fetchApi("/RunOnRunpod/submit", {
             method: "POST",
-            body: JSON.stringify({ workflow: prompt.output, settings: getSettings() }),
+            body: JSON.stringify({ workflow: prompt.output, settings: getSettings(), prep_id: prepId }),
         });
         const data = await res.json();
 
@@ -222,8 +222,8 @@ async function submitJob() {
             return;
         }
 
-        // Replace temp ID with real job ID
-        const oldCard = document.getElementById(`runpod-job-${tempId}`);
+        // Replace prep ID with real job ID
+        const oldCard = document.getElementById(`runpod-job-${prepId}`);
         job.id = data.job_id;
         if (oldCard) oldCard.id = `runpod-job-${job.id}`;
         renderJobCard(job);
@@ -549,16 +549,12 @@ app.registerExtension({
 
         // WebSocket event handling — route to correct job
         api.addEventListener("runonrunpod", (event) => {
-            const { event: evt, job_id, message, files, error } = event.detail;
+            const { event: evt, job_id, prep_id, message, files, error, percent, uploaded_mb, total_mb } = event.detail;
 
-            const { percent, uploaded_mb, total_mb } = event.detail;
-
-            // For progress/upload events during preparation (before job_id is assigned),
-            // update the most recent preparing job
+            // For progress/upload events during preparation, route by prep_id
             if (evt === "progress" || evt === "upload_progress") {
-                const prepJob = jobs.find(j =>
-                    j.state === JOB_STATE.PREPARING || j.id === job_id
-                );
+                const targetId = prep_id || job_id;
+                const prepJob = targetId ? findJob(targetId) : null;
                 if (prepJob) {
                     const updates = { message };
                     if (evt === "upload_progress" && percent != null) {
@@ -573,6 +569,17 @@ app.registerExtension({
             }
 
             if (!job_id) return;
+
+            // For "queued", the job might still have prep_id — link them
+            if (evt === "queued" && prep_id) {
+                const prepJob = findJob(prep_id);
+                if (prepJob) {
+                    const oldCard = document.getElementById(`runpod-job-${prep_id}`);
+                    prepJob.id = job_id;
+                    if (oldCard) oldCard.id = `runpod-job-${job_id}`;
+                }
+            }
+
             const job = findJob(job_id);
             if (!job) return;
 
