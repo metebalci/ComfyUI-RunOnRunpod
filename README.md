@@ -14,6 +14,7 @@ Installed in your local ComfyUI's `custom_nodes/` directory. Provides:
 - Click the button to cancel a running job
 - **Settings panel** for RunPod and storage configuration
 - Uploads input files (images, video, audio) to the network volume before submitting
+- Automatically uploads missing models (checkpoints, LoRAs, VAEs, text encoders, etc.) to the network volume
 - Downloads output files back to your local ComfyUI output directory after job completion
 - Optional cleanup of remote inputs and outputs after each job
 
@@ -85,7 +86,9 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
 - S3 Secret Key — from RunPod S3 API keys
 - Endpoint ID — your RunPod Serverless endpoint ID
 - Bucket Name — your network volume ID
-- S3 Endpoint URL — RunPod S3 endpoint (region-specific, shown on RunPod dashboard)
+- Region — S3 region (shown on RunPod dashboard, e.g. `eur-is-1`)
+- Endpoint URL — RunPod S3 endpoint (region-specific, shown on RunPod dashboard)
+- Upload missing models automatically — default on
 - Delete inputs from network volume after job — default off
 - Delete outputs from network volume after job — default on (outputs are downloaded locally first)
 
@@ -108,6 +111,8 @@ Everything lives on the RunPod network volume:
 - **Models** — `/models/` (symlinked to ComfyUI's model path)
 - **Inputs** — `/inputs/` (plugin uploads via RunPod S3 API, worker reads as local files)
 - **Outputs** — `/outputs/` (worker writes as local files, accessible via RunPod S3 API)
+
+When you submit a job, the plugin scans the workflow for model loader nodes (CheckpointLoader, LoraLoader, VAELoader, CLIPLoader, UNETLoader, ControlNetLoader, etc.) and checks if each model exists on the network volume. Missing models are automatically uploaded from your local ComfyUI models directory. This can be disabled in settings.
 
 Input files are deduplicated using content hashing (SHA-256). Each file is stored as `inputs/{hash}{ext}`, so uploading the same image across multiple jobs skips the upload entirely.
 
