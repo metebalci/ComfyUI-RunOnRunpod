@@ -303,7 +303,9 @@ async def download_outputs(request):
         output_dir = _get_output_directory()
         for rel_path in output_files:
             s3_key = f"outputs/{rel_path}"
-            filename = os.path.basename(rel_path)
+            job_prefix = rel_path.split("/")[0]
+            basename = os.path.basename(rel_path)
+            filename = f"{job_prefix}_{basename}"
             dest = os.path.join(output_dir, filename)
             try:
                 print(_PREFIX, f"Downloading {s3_key} -> {dest}")
