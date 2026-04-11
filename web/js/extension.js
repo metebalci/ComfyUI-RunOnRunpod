@@ -56,7 +56,7 @@ app.registerExtension({
         },
         // Storage
         {
-            id: "Run on Runpod.Storage.s3Endpoint",
+            id: "Run on Runpod.Storage.endpointUrl",
             name: "Endpoint URL",
             type: "text",
             defaultValue: "",
@@ -85,7 +85,7 @@ app.registerExtension({
                 endpointId: app.extensionManager.setting.get("Run on Runpod.Serverless.endpointId") || "",
                 s3AccessKey: app.extensionManager.setting.get("Run on Runpod.Keys.s3AccessKey") || "",
                 s3SecretKey: app.extensionManager.setting.get("Run on Runpod.Keys.s3SecretKey") || "",
-                s3Endpoint: app.extensionManager.setting.get("Run on Runpod.Storage.s3Endpoint") || "",
+                s3Endpoint: app.extensionManager.setting.get("Run on Runpod.Storage.endpointUrl") || "",
                 bucketName: app.extensionManager.setting.get("Run on Runpod.Storage.bucketName") || "",
                 deleteInputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteInputsAfterJob") ?? false,
                 deleteOutputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteOutputsAfterJob") ?? true,
