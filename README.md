@@ -81,16 +81,23 @@ Restart ComfyUI.
 
 Open ComfyUI Settings and find the **Run on Runpod** section:
 
-- API Key — RunPod API key
-- S3 Access Key — from RunPod S3 API keys
-- S3 Secret Key — from RunPod S3 API keys
-- Endpoint ID — your RunPod Serverless endpoint ID
-- Bucket Name — your network volume ID
-- Region — S3 region (shown on RunPod dashboard, e.g. `eur-is-1`)
-- Endpoint URL — RunPod S3 endpoint (region-specific, shown on RunPod dashboard)
+**Job:**
 - Upload missing models automatically — default on
 - Delete inputs from network volume after job — default off
 - Delete outputs from network volume after job — default on (outputs are downloaded locally first)
+
+**Keys:**
+- API Key — RunPod API key
+- S3 Access Key — from RunPod S3 API keys
+- S3 Secret Key — from RunPod S3 API keys
+
+**Serverless:**
+- Endpoint ID — your RunPod Serverless endpoint ID
+
+**Storage:**
+- Bucket Name — your network volume ID
+- Region — S3 region (shown on RunPod dashboard, e.g. `eur-is-1`)
+- Endpoint URL — RunPod S3 endpoint (region-specific, shown on RunPod dashboard)
 
 ## Usage
 
