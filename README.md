@@ -108,8 +108,8 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
    - **Cyan (pulsing)** — preparing (validating, uploading models/inputs)
    - **Amber** — queued on RunPod
    - **Blue (pulsing)** — running
-   - **Green** — completed (resets after 3s)
-   - **Red** — failed (resets after 3s)
+   - **Green** — completed (resets to idle after 3s)
+   - **Red** — failed (resets to idle after 3s)
 4. Outputs are automatically downloaded to your local ComfyUI output directory
 5. Click the button while a job is running to cancel it
 
