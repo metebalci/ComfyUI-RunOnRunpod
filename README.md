@@ -52,6 +52,8 @@ To build your own image with different custom nodes:
    docker push your-dockerhub-username/comfyui-runonrunpod:latest
    ```
 
+**Memory warning:** Building the Docker image compiles flash-attn from source, which is extremely memory-intensive. Each parallel compilation job uses ~16GB of RAM. The Dockerfile defaults to 2 parallel jobs (`MAX_JOBS` and `NINJA_MAX_JOBS`), requiring ~32GB of RAM. If you have less memory, set both to 1 in the Dockerfile, but you will still need at least 16GB (possibly more).
+
 Create a RunPod Serverless endpoint using the image, with the network volume attached.
 
 ### 3. Install the plugin

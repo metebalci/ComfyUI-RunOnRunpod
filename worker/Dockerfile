@@ -2,8 +2,9 @@ FROM nvidia/cuda:13.0.2-devel-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Minimal packages for Python/PyTorch/flash-attn (stable — changing this rebuilds flash-attn)
 RUN apt-get update && apt-get install -y \
-    python3 python3-pip python3-venv git wget curl \
+    python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Create venv
@@ -15,8 +16,14 @@ RUN pip install torch==2.11.0 torchvision torchaudio --index-url https://downloa
 
 # Install Flash Attention 2 (stable layer — compiled from source for CUDA 13.0)
 RUN pip install packaging ninja wheel setuptools
-ENV MAX_JOBS=4
+ENV MAX_JOBS=2
+ENV NINJA_MAX_JOBS=2
 RUN pip install flash-attn --no-build-isolation
+
+# Additional system packages (changing this does NOT rebuild flash-attn)
+RUN apt-get update && apt-get install -y \
+    git wget curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install RunPod SDK and handler dependencies (stable layer)
 RUN pip install runpod requests
