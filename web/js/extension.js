@@ -215,8 +215,8 @@ app.registerExtension({
                         setState(STATE.RUNNING);
                     } else if (data.status === "COMPLETED") {
                         stopPolling();
+                        console.log(`[RunOnRunpod] Job completed, output:`, data.output);
                         const outputFiles = data.output?.output_files || [];
-                        console.log(`[RunOnRunpod] Job completed — ${outputFiles.length} output(s)`);
                         await handleJobEnd(outputFiles);
                         setState(STATE.COMPLETED);
                     } else if (

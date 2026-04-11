@@ -266,7 +266,9 @@ async def get_status(request):
     error = result.get("error")
     output = result.get("output")
 
-    if status == "FAILED":
+    if status == "COMPLETED":
+        print(_PREFIX,f"Job {job_id}: COMPLETED, output: {output}")
+    elif status == "FAILED":
         print(_PREFIX,f"Job {job_id} FAILED: {error or output}")
     elif status in ("CANCELLED", "TIMED_OUT"):
         print(_PREFIX,f"Job {job_id}: {status}")
