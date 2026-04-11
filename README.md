@@ -52,6 +52,8 @@ To build your own image with different custom nodes:
    docker push your-dockerhub-username/comfyui-runonrunpod:latest
    ```
 
+For quick testing, you can install extra custom nodes at startup without rebuilding the image by setting the `EXTRA_CUSTOM_NODES_URL` environment variable to a URL pointing to a text file with git URLs (same format as `custom_nodes.txt`). Nodes already baked into the image are skipped. This adds to cold start time, so for production use, rebuild the image instead.
+
 The Docker image uses prebuilt flash-attn wheels from [mjun0812/flash-attention-prebuild-wheels](https://github.com/mjun0812/flash-attention-prebuild-wheels).
 
 Create a RunPod Serverless endpoint using the image, with the network volume attached.
