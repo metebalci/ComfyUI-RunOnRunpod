@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 
@@ -341,9 +342,9 @@ async def get_status(request):
     output = result.get("output")
 
     if status == "COMPLETED":
-        print(_PREFIX,f"Job {job_id}: COMPLETED, output: {output}")
+        print(_PREFIX,f"Job {job_id}: COMPLETED, output:\n{json.dumps(output, indent=2)}")
     elif status == "FAILED":
-        print(_PREFIX,f"Job {job_id} FAILED: {error or output}")
+        print(_PREFIX,f"Job {job_id} FAILED:\n{json.dumps(error or output, indent=2)}")
     elif status in ("CANCELLED", "TIMED_OUT"):
         print(_PREFIX,f"Job {job_id}: {status}")
     else:

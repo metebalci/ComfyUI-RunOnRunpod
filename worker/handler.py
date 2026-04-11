@@ -63,7 +63,7 @@ def collect_outputs(history_entry: dict) -> list[str]:
     """Extract output file paths from a ComfyUI history entry."""
     files = []
     outputs = history_entry.get("outputs", {})
-    print(f"[RunOnRunpod] History status: {history_entry.get('status', {})}")
+    print(f"[RunOnRunpod] History status:\n{json.dumps(history_entry.get('status', {}), indent=2)}")
     print(f"[RunOnRunpod] Output nodes: {list(outputs.keys())}")
     for _node_id, node_output in outputs.items():
         for key in ("images", "gifs", "audio", "videos"):
