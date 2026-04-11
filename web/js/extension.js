@@ -80,7 +80,7 @@ function stateBadge(state) {
         [JOB_STATE.RUNNING]: { bg: "#1a3a2a", text: "#44cc88" },
         [JOB_STATE.COMPLETED]: { bg: "#1a3a1a", text: "#44cc44" },
         [JOB_STATE.FAILED]: { bg: "#3a1a1a", text: "#cc4444" },
-        [JOB_STATE.CANCELLED]: { bg: "#2a2a2a", text: "#888888" },
+        [JOB_STATE.CANCELLED]: { bg: "#3a1a1a", text: "#cc4444" },
     };
     const c = colors[state] || { bg: "#2a2a2a", text: "#888" };
     return `<span style="
@@ -197,7 +197,7 @@ async function submitJob() {
     }
 
     // Create a temporary job entry while preparing
-    const prepId = crypto.randomUUID();
+    const prepId = `prep-${crypto.randomUUID()}`;
     const job = addJob(prepId);
 
     try {
@@ -222,11 +222,13 @@ async function submitJob() {
             return;
         }
 
-        // Replace prep ID with real job ID
-        const oldCard = document.getElementById(`runpod-job-${prepId}`);
-        job.id = data.job_id;
-        if (oldCard) oldCard.id = `runpod-job-${job.id}`;
-        renderJobCard(job);
+        // Replace prep ID with real job ID (WS "queued" event handles state update)
+        if (job.id !== data.job_id) {
+            const oldCard = document.getElementById(`runpod-job-${job.id}`);
+            job.id = data.job_id;
+            if (oldCard) oldCard.id = `runpod-job-${job.id}`;
+            renderJobCard(job);
+        }
     } catch (err) {
         console.error("[RunOnRunpod] Submit error:", err);
         job.state = JOB_STATE.FAILED;
