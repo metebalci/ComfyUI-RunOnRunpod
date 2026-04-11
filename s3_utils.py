@@ -39,12 +39,13 @@ def key_exists(client, bucket: str, key: str) -> bool:
 
 
 class _UploadProgress:
-    def __init__(self, file_path: str, key: str, interval: float = 5.0):
+    def __init__(self, file_path: str, key: str, progress_fn=None, interval: float = 2.0):
         self._total = os.path.getsize(file_path)
         self._key = key
         self._uploaded = 0
         self._last_log = 0.0
         self._interval = interval
+        self._progress_fn = progress_fn
 
     def __call__(self, bytes_amount):
         self._uploaded += bytes_amount
@@ -54,11 +55,13 @@ class _UploadProgress:
             mb_done = self._uploaded / (1024 * 1024)
             mb_total = self._total / (1024 * 1024)
             print(f"[RunOnRunpod] Uploading {self._key}: {mb_done:.0f}/{mb_total:.0f} MB ({pct:.0f}%)")
+            if self._progress_fn:
+                self._progress_fn(self._uploaded, self._total)
             self._last_log = now
 
 
-def upload_file(client, bucket: str, key: str, file_path: str):
-    callback = _UploadProgress(file_path, key)
+def upload_file(client, bucket: str, key: str, file_path: str, progress_fn=None):
+    callback = _UploadProgress(file_path, key, progress_fn=progress_fn)
     client.upload_file(file_path, bucket, key, Callback=callback)
 
 

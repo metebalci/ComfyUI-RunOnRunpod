@@ -21,6 +21,7 @@ function addJob(jobId) {
         state: JOB_STATE.PREPARING,
         message: "Preparing...",
         files: [],
+        uploadPercent: -1,
         createdAt: new Date(),
     };
     jobs.unshift(job);
@@ -133,6 +134,7 @@ function renderJobCard(job) {
         </div>
         <div class="runpod-job-id" title="${job.id}">${job.id}</div>
         <div class="runpod-job-message">${job.message || ""}</div>
+        <div class="runpod-job-progress">${job.uploadPercent >= 0 ? `<div class="runpod-job-progress-bar" style="width:${job.uploadPercent}%"></div>` : ""}</div>
         ${previewHtml}
     `;
 
@@ -195,10 +197,14 @@ async function submitJob() {
         const data = await res.json();
 
         if (data.error) {
-            console.error("[RunOnRunpod] Submit error:", data.error);
-            job.id = tempId;
-            job.state = JOB_STATE.FAILED;
-            job.message = data.error;
+            if (data.error === "Cancelled") {
+                job.state = JOB_STATE.CANCELLED;
+                job.message = "Cancelled";
+            } else {
+                console.error("[RunOnRunpod] Submit error:", data.error);
+                job.state = JOB_STATE.FAILED;
+                job.message = data.error;
+            }
             renderJobList();
             return;
         }
@@ -219,6 +225,18 @@ async function submitJob() {
 async function cancelJob(jobId) {
     const job = findJob(jobId);
     if (!job) return;
+
+    if (job.state === JOB_STATE.PREPARING) {
+        // Cancel the upload/preparation phase — backend will stop after current upload finishes
+        updateJob(jobId, { message: "Cancelling after current upload..." });
+        try {
+            await api.fetchApi("/RunOnRunpod/cancel-prepare", { method: "POST" });
+        } catch (err) {
+            console.error("[RunOnRunpod] Cancel-prepare error:", err);
+        }
+        // The submit fetch will return an error which submitJob() handles
+        return;
+    }
 
     try {
         await api.fetchApi("/RunOnRunpod/cancel", {
@@ -336,7 +354,6 @@ const STYLES = `
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 4px;
     }
     .runpod-job-id {
         font-family: monospace;
@@ -345,6 +362,7 @@ const STYLES = `
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        margin-top: 4px;
     }
     .runpod-job-time {
         font-size: 11px;
@@ -353,11 +371,27 @@ const STYLES = `
     .runpod-job-message {
         font-size: 12px;
         color: #aaa;
-        margin-top: 2px;
+        margin-top: 4px;
         word-break: break-word;
     }
     .runpod-job-message:empty {
         display: none;
+    }
+    .runpod-job-progress {
+        margin-top: 4px;
+        height: 4px;
+        background: #333;
+        border-radius: 2px;
+        overflow: hidden;
+    }
+    .runpod-job-progress:empty {
+        display: none;
+    }
+    .runpod-job-progress-bar {
+        height: 100%;
+        background: #4488cc;
+        border-radius: 2px;
+        transition: width 0.3s ease;
     }
     .runpod-job-preview {
         max-width: 100%;
@@ -466,14 +500,23 @@ app.registerExtension({
         api.addEventListener("runonrunpod", (event) => {
             const { event: evt, job_id, message, files, error } = event.detail;
 
-            // For progress events during preparation (before job_id is assigned),
+            const { percent, uploaded_mb, total_mb } = event.detail;
+
+            // For progress/upload events during preparation (before job_id is assigned),
             // update the most recent preparing job
-            if (evt === "progress") {
+            if (evt === "progress" || evt === "upload_progress") {
                 const prepJob = jobs.find(j =>
                     j.state === JOB_STATE.PREPARING || j.id === job_id
                 );
                 if (prepJob) {
-                    updateJob(prepJob.id, { message });
+                    const updates = { message };
+                    if (evt === "upload_progress" && percent != null) {
+                        updates.message = `${message} (${uploaded_mb}/${total_mb} MB)`;
+                        updates.uploadPercent = percent;
+                    } else {
+                        updates.uploadPercent = -1;
+                    }
+                    updateJob(prepJob.id, updates);
                 }
                 return;
             }
@@ -484,7 +527,7 @@ app.registerExtension({
 
             switch (evt) {
                 case "queued":
-                    updateJob(job_id, { state: JOB_STATE.QUEUED, message: "Queued on RunPod..." });
+                    updateJob(job_id, { state: JOB_STATE.QUEUED, message: "Queued on RunPod...", uploadPercent: -1 });
                     break;
                 case "running":
                     updateJob(job_id, { state: JOB_STATE.RUNNING, message: "Running..." });

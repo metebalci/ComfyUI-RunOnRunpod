@@ -16,6 +16,9 @@ routes = PromptServer.instance.routes
 # In-memory state for active jobs: {job_id: asyncio.Task}
 _active_tasks = {}
 
+# Flag to cancel the current submit (preparation/upload phase)
+_prepare_cancelled = False
+
 
 def _send_event(event: str, data: dict = {}):
     """Push an event to the frontend via WebSocket."""
@@ -189,8 +192,18 @@ async def verify_settings(request):
     return web.json_response(results)
 
 
+@routes.post("/RunOnRunpod/cancel-prepare")
+async def cancel_prepare(request):
+    """Cancel the current submit/upload preparation phase."""
+    global _prepare_cancelled
+    _prepare_cancelled = True
+    return web.json_response({"status": "cancelling"})
+
+
 @routes.post("/RunOnRunpod/submit")
 async def submit_job(request):
+    global _prepare_cancelled
+    _prepare_cancelled = False
 
     data = await request.json()
     settings = data.get("settings", {})
@@ -239,7 +252,7 @@ async def submit_job(request):
     # Validate S3 access
     try:
         client = _make_s3_client(settings)
-        client.head_bucket(Bucket=bucket)
+        await asyncio.to_thread(client.head_bucket, Bucket=bucket)
     except Exception as e:
         print(_PREFIX,f"S3 storage validation failed: {e}")
         return web.json_response(
@@ -254,13 +267,16 @@ async def submit_job(request):
         input_dir = _get_input_directory()
 
         for filename in input_file_refs:
+            if _prepare_cancelled:
+                print(_PREFIX, "Submit cancelled during input upload")
+                return web.json_response({"error": "Cancelled"}, status=499)
             file_path = os.path.join(input_dir, filename)
             if not os.path.exists(file_path):
                 return web.json_response(
                     {"error": f"Input file not found: {filename}"}, status=400
                 )
             _send_event("progress", {"message": f"Uploading input: {filename}"})
-            s3_key = upload_file_dedup(client, bucket, file_path)
+            s3_key = await asyncio.to_thread(upload_file_dedup, client, bucket, file_path)
             input_files[filename] = s3_key
 
     # Upload missing models to network volume
@@ -268,13 +284,29 @@ async def submit_job(request):
         model_refs = _scan_model_files(workflow)
         if model_refs:
             for (subdir, filename) in model_refs:
+                if _prepare_cancelled:
+                    print(_PREFIX, "Submit cancelled during model upload")
+                    return web.json_response({"error": "Cancelled"}, status=499)
                 s3_key = f"models/{subdir}/{filename}"
-                if not key_exists(client, bucket, s3_key):
+                exists = await asyncio.to_thread(key_exists, client, bucket, s3_key)
+                if not exists:
                     local_path = _find_model_file(subdir, filename)
                     if local_path:
                         _send_event("progress", {"message": f"Uploading model: {filename}"})
                         print(_PREFIX, f"Uploading missing model: {local_path} -> {s3_key}")
-                        upload_file(client, bucket, s3_key, local_path)
+
+                        def _model_progress(uploaded, total, _fn=filename):
+                            pct = int(uploaded / total * 100) if total else 100
+                            mb_done = uploaded / (1024 * 1024)
+                            mb_total = total / (1024 * 1024)
+                            _send_event("upload_progress", {
+                                "message": f"Uploading model: {_fn}",
+                                "percent": pct,
+                                "uploaded_mb": round(mb_done, 1),
+                                "total_mb": round(mb_total, 1),
+                            })
+
+                        await asyncio.to_thread(upload_file, client, bucket, s3_key, local_path, _model_progress)
                     else:
                         print(_PREFIX, f"Model not found locally: {subdir}/{filename}")
                 else:
