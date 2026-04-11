@@ -5,7 +5,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-from .s3_utils import get_s3_client, upload_file
+from .s3_utils import get_s3_client, upload_file_dedup, download_file, delete_objects
 
 _PREFIX = "[RunOnRunpod]"
 
@@ -34,6 +34,19 @@ def _get_input_directory() -> str:
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "..",
             "input",
+        )
+
+
+def _get_output_directory() -> str:
+    """Return ComfyUI's output directory path."""
+    try:
+        import folder_paths
+        return folder_paths.get_output_directory()
+    except ImportError:
+        return os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "..",
+            "output",
         )
 
 
@@ -182,8 +195,7 @@ async def submit_job(request):
                 return web.json_response(
                     {"error": f"Input file not found: {filename}"}, status=400
                 )
-            s3_key = f"inputs/{filename}"
-            upload_file(client, bucket, s3_key, file_path)
+            s3_key = upload_file_dedup(client, bucket, file_path)
             input_files[filename] = s3_key
 
     # Submit to RunPod
@@ -215,6 +227,7 @@ async def submit_job(request):
     return web.json_response({
         "job_id": job_id,
         "status": result.get("status", "IN_QUEUE"),
+        "input_files": input_files,
     })
 
 
@@ -264,6 +277,61 @@ async def get_status(request):
         "status": status,
         "output": output,
         "error": error,
+    })
+
+
+@routes.post("/RunOnRunpod/download")
+async def download_outputs(request):
+    """Download output files from S3 to local ComfyUI and optionally clean up."""
+    data = await request.json()
+    settings = data.get("settings", {})
+    output_files = data.get("output_files", [])
+    input_files = data.get("input_files", {})
+    delete_inputs = data.get("delete_inputs", False)
+    delete_outputs = data.get("delete_outputs", False)
+
+    bucket = settings.get("bucketName", "")
+    try:
+        client = _make_s3_client(settings)
+    except Exception as e:
+        print(_PREFIX, f"S3 client error: {e}")
+        return web.json_response({"error": str(e)}, status=400)
+
+    # Download output files to local ComfyUI output directory
+    downloaded = []
+    if output_files:
+        output_dir = _get_output_directory()
+        for rel_path in output_files:
+            s3_key = f"outputs/{rel_path}"
+            filename = os.path.basename(rel_path)
+            dest = os.path.join(output_dir, filename)
+            try:
+                print(_PREFIX, f"Downloading {s3_key} -> {dest}")
+                download_file(client, bucket, s3_key, dest)
+                downloaded.append(filename)
+            except Exception as e:
+                print(_PREFIX, f"Failed to download {s3_key}: {e}")
+
+    # Clean up remote outputs
+    if delete_outputs and output_files:
+        try:
+            s3_keys = [f"outputs/{rel_path}" for rel_path in output_files]
+            print(_PREFIX, f"Deleting {len(s3_keys)} output(s) from S3")
+            delete_objects(client, bucket, s3_keys)
+        except Exception as e:
+            print(_PREFIX, f"Failed to delete outputs: {e}")
+
+    # Clean up remote inputs
+    if delete_inputs and input_files:
+        try:
+            s3_keys = list(input_files.values())
+            print(_PREFIX, f"Deleting {len(s3_keys)} input(s) from S3")
+            delete_objects(client, bucket, s3_keys)
+        except Exception as e:
+            print(_PREFIX, f"Failed to delete inputs: {e}")
+
+    return web.json_response({
+        "downloaded": downloaded,
     })
 
 

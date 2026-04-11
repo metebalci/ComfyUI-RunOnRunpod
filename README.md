@@ -2,6 +2,8 @@
 
 A ComfyUI plugin that lets you run workflows on [RunPod Serverless](https://www.runpod.io/product/serverless). Adds a "Run on RunPod" button to the UI that submits the current workflow to your RunPod endpoint and shows results.
 
+![Run on RunPod button](runonrunpod-button.png)
+
 ## Components
 
 ### Plugin (ComfyUI custom node)
@@ -12,6 +14,8 @@ Installed in your local ComfyUI's `custom_nodes/` directory. Provides:
 - Click the button to cancel a running job
 - **Settings panel** for RunPod and storage configuration
 - Uploads input files (images, video, audio) to the network volume before submitting
+- Downloads output files back to your local ComfyUI output directory after job completion
+- Optional cleanup of remote inputs and outputs after each job
 
 ### Worker (RunPod Serverless)
 
@@ -82,6 +86,8 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
 - Endpoint ID — your RunPod Serverless endpoint ID
 - Bucket Name — your network volume ID
 - S3 Endpoint URL — RunPod S3 endpoint (region-specific, shown on RunPod dashboard)
+- Delete inputs from network volume after job — default off
+- Delete outputs from network volume after job — default on (outputs are downloaded locally first)
 
 ## Usage
 
@@ -92,7 +98,7 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
    - **Blue (pulsing)** — running
    - **Green** — completed
    - **Red** — failed
-4. Outputs are saved to `/outputs/{job-id}/` on the network volume
+4. Outputs are automatically downloaded to your local ComfyUI output directory
 5. Click the button while a job is running to cancel it
 
 ## Storage Architecture
@@ -102,6 +108,13 @@ Everything lives on the RunPod network volume:
 - **Models** — `/models/` (symlinked to ComfyUI's model path)
 - **Inputs** — `/inputs/` (plugin uploads via RunPod S3 API, worker reads as local files)
 - **Outputs** — `/outputs/` (worker writes as local files, accessible via RunPod S3 API)
+
+Input files are deduplicated using content hashing (SHA-256). Each file is stored as `inputs/{hash}{ext}`, so uploading the same image across multiple jobs skips the upload entirely.
+
+After a job ends (whether it succeeds or fails), the plugin downloads output files to your local ComfyUI output directory. Two cleanup settings control whether remote files are removed from the network volume afterward:
+
+- **Delete inputs after job** (default: off) — keeps deduplicated inputs for reuse across jobs
+- **Delete outputs after job** (default: on) — removes remote outputs since they've been downloaded locally
 
 The worker has zero storage configuration — the network volume is mounted locally and it just reads/writes files.
 

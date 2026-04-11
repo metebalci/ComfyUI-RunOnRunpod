@@ -12,6 +12,7 @@ const STATE = {
 
 let currentState = STATE.IDLE;
 let currentJobId = null;
+let currentInputFiles = {};
 let pollInterval = null;
 
 app.registerExtension({
@@ -54,6 +55,18 @@ app.registerExtension({
             type: "text",
             defaultValue: "",
         },
+        {
+            id: "Run on Runpod.Runpod.deleteInputsAfterJob",
+            name: "Delete inputs from network volume after job",
+            type: "boolean",
+            defaultValue: false,
+        },
+        {
+            id: "Run on Runpod.Runpod.deleteOutputsAfterJob",
+            name: "Delete outputs from network volume after job",
+            type: "boolean",
+            defaultValue: true,
+        },
     ],
 
     async setup() {
@@ -67,6 +80,8 @@ app.registerExtension({
                 s3SecretKey: app.extensionManager.setting.get("Run on Runpod.Runpod.s3SecretKey") || "",
                 s3Endpoint: app.extensionManager.setting.get("Run on Runpod.Runpod.s3Endpoint") || "",
                 bucketName: app.extensionManager.setting.get("Run on Runpod.Runpod.bucketName") || "",
+                deleteInputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Runpod.deleteInputsAfterJob") ?? false,
+                deleteOutputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Runpod.deleteOutputsAfterJob") ?? true,
             };
         }
 
@@ -155,6 +170,29 @@ app.registerExtension({
             }
         }
 
+        // --- Download outputs and cleanup ---
+        async function handleJobEnd(outputFiles) {
+            const s = getSettings();
+            try {
+                const res = await api.fetchApi("/RunOnRunpod/download", {
+                    method: "POST",
+                    body: JSON.stringify({
+                        output_files: outputFiles,
+                        input_files: currentInputFiles,
+                        delete_inputs: s.deleteInputsAfterJob,
+                        delete_outputs: s.deleteOutputsAfterJob,
+                        settings: s,
+                    }),
+                });
+                const data = await res.json();
+                if (data.downloaded && data.downloaded.length > 0) {
+                    console.log(`[RunOnRunpod] Downloaded ${data.downloaded.length} file(s) to local output directory`);
+                }
+            } catch (err) {
+                console.error("[RunOnRunpod] Download/cleanup error:", err);
+            }
+        }
+
         // --- Polling ---
         function startPolling(jobId) {
             setState(STATE.QUEUED);
@@ -170,10 +208,10 @@ app.registerExtension({
                         setState(STATE.RUNNING);
                     } else if (data.status === "COMPLETED") {
                         stopPolling();
+                        const outputFiles = data.output?.output_files || [];
+                        console.log(`[RunOnRunpod] Job completed — ${outputFiles.length} output(s)`);
+                        await handleJobEnd(outputFiles);
                         setState(STATE.COMPLETED);
-
-                        const outputCount = data.output?.output_count || 0;
-                        console.log(`[RunOnRunpod] Job completed — ${outputCount} output(s) on network volume`);
                     } else if (
                         data.status === "FAILED" ||
                         data.status === "CANCELLED" ||
@@ -181,8 +219,9 @@ app.registerExtension({
                         data.status === "UNKNOWN"
                     ) {
                         stopPolling();
-                        setState(STATE.FAILED);
                         console.error(`[RunOnRunpod] Job ${data.status}:`, data.error || "");
+                        await handleJobEnd([]);
+                        setState(STATE.FAILED);
                     }
                 } catch (err) {
                     console.error("[RunOnRunpod] Polling error:", err);
@@ -198,7 +237,9 @@ app.registerExtension({
                 pollInterval = null;
             }
             currentJobId = null;
+            currentInputFiles = {};
             sessionStorage.removeItem("runpod_job_id");
+            sessionStorage.removeItem("runpod_input_files");
         }
 
         // --- Click handler: submit or cancel ---
@@ -239,7 +280,9 @@ app.registerExtension({
                     }
 
                     currentJobId = data.job_id;
+                    currentInputFiles = data.input_files || {};
                     sessionStorage.setItem("runpod_job_id", currentJobId);
+                    sessionStorage.setItem("runpod_input_files", JSON.stringify(currentInputFiles));
                     startPolling(currentJobId);
                 } catch (err) {
                     console.error("[RunOnRunpod] Submit error:", err);
@@ -265,6 +308,11 @@ app.registerExtension({
         const savedJobId = sessionStorage.getItem("runpod_job_id");
         if (savedJobId) {
             currentJobId = savedJobId;
+            try {
+                currentInputFiles = JSON.parse(sessionStorage.getItem("runpod_input_files") || "{}");
+            } catch {
+                currentInputFiles = {};
+            }
             startPolling(savedJobId);
         }
 
