@@ -96,7 +96,6 @@ function renderJobCard(job) {
         return;
     }
 
-    const shortId = job.id.length > 12 ? job.id.slice(0, 12) + "..." : job.id;
     const time = job.createdAt.toLocaleTimeString();
     const isActive = [JOB_STATE.PREPARING, JOB_STATE.QUEUED, JOB_STATE.RUNNING].includes(job.state);
 
@@ -126,15 +125,13 @@ function renderJobCard(job) {
 
     card.innerHTML = `
         <div class="runpod-job-header">
-            <div>
-                <span class="runpod-job-id" title="${job.id}">${shortId}</span>
-                <span class="runpod-job-time">${time}</span>
-            </div>
+            <span class="runpod-job-time">${time}</span>
             <div style="display:flex;align-items:center;gap:6px;">
                 ${stateBadge(job.state)}
                 ${cancelBtnHtml}
             </div>
         </div>
+        <div class="runpod-job-id" title="${job.id}">${job.id}</div>
         <div class="runpod-job-message">${job.message || ""}</div>
         ${previewHtml}
     `;
@@ -344,12 +341,14 @@ const STYLES = `
     .runpod-job-id {
         font-family: monospace;
         font-size: 11px;
-        color: #888;
+        color: #666;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .runpod-job-time {
         font-size: 11px;
-        color: #666;
-        margin-left: 8px;
+        color: #888;
     }
     .runpod-job-message {
         font-size: 12px;
