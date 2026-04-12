@@ -541,9 +541,23 @@ async function submitJob() {
     try {
         const prompt = await app.graphToPrompt();
 
+        // Pull the workflow's models[] metadata if the template author
+        // included it. ComfyUI tutorial templates ship with this — it
+        // names every model needed and a canonical download URL,
+        // which the backend uses as the highest-priority source.
+        const wf = prompt.workflow || {};
+        const workflowModels = (wf.models && Array.isArray(wf.models) ? wf.models : null)
+            || (wf.extra && Array.isArray(wf.extra.models) ? wf.extra.models : null)
+            || [];
+
         const res = await api.fetchApi("/RunOnRunpod/submit", {
             method: "POST",
-            body: JSON.stringify({ workflow: prompt.output, settings: getSettings(), prep_id: prepId }),
+            body: JSON.stringify({
+                workflow: prompt.output,
+                workflow_models: workflowModels,
+                settings: getSettings(),
+                prep_id: prepId,
+            }),
         });
         const data = await res.json();
 

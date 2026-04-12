@@ -356,6 +356,16 @@ async def _do_submit(data: dict):
     workflow = data.get("workflow", {})
     prep_id = data.get("prep_id", "")
 
+    # Optional models[] metadata from the workflow author. When the UI
+    # workflow declares the canonical download URL for each model, we
+    # treat it as the highest-priority source — see the model lookup
+    # loop below.
+    workflow_models_input = data.get("workflow_models", []) or []
+    workflow_models_by_name: dict[str, dict] = {}
+    for _m in workflow_models_input:
+        if isinstance(_m, dict) and _m.get("name") and _m.get("url"):
+            workflow_models_by_name[_m["name"]] = _m
+
     api_key = settings.get("apiKey", "")
     endpoint_id = settings.get("endpointId", "")
 
@@ -511,39 +521,56 @@ async def _do_submit(data: dict):
                 missing.append((subdir, filename, local_path))
 
             use_source = settings.get("downloadModelsFromTheSource", False)
+            civitai_key = settings.get("civitaiApiKey") or None
             worker_downloads: list[dict] = []
             upload_queue: list[tuple[str, str, str]] = []  # (subdir, filename, local_path)
             # filename -> (subdir, filename, local_path) so worker failures
             # can fall back to the original local file for an upload retry.
             worker_fallbacks: dict[str, tuple[str, str, str]] = {}
 
-            if use_source:
-                civitai_key = settings.get("civitaiApiKey") or None
+            if missing:
                 _send_event("progress", {
                     "prep_id": prep_id,
-                    "message": f"Looking up sources for {len(missing)} model(s)...",
+                    "message": f"Resolving sources for {len(missing)} model(s)...",
                 })
-                for subdir, filename, local_path in missing:
-                    if prep_id in _cancelled_preps:
-                        print(_PREFIX, "Submit cancelled during source lookup")
-                        return web.json_response({"error": "Cancelled"}, status=499)
+
+            for subdir, filename, local_path in missing:
+                if prep_id in _cancelled_preps:
+                    print(_PREFIX, "Submit cancelled during source lookup")
+                    return web.json_response({"error": "Cancelled"}, status=499)
+
+                descriptor = None
+
+                # Step 0: workflow metadata. Authoritative — the
+                # workflow author named the file and the canonical
+                # URL. Tried regardless of the "Download models from
+                # the source" setting because it's not a third-party
+                # lookup.
+                wm = workflow_models_by_name.get(filename)
+                if wm and wm.get("url"):
+                    descriptor = {
+                        "source": "workflow",
+                        "url": wm["url"],
+                        "dest_path": f"models/{subdir}/{filename}",
+                        "expected_sha256": wm.get("hash") or wm.get("sha256"),
+                        "auth": "hf" if "huggingface.co" in wm["url"] else "none",
+                    }
+                    print(_PREFIX, f"Workflow metadata hit: {filename} -> {wm['url']}")
+
+                # Steps 1-3: lookup chain — only when the user opted in.
+                if descriptor is None and use_source:
                     descriptor = await asyncio.to_thread(
                         lookup_model, subdir, filename, local_path, civitai_key
                     )
-                    if descriptor:
-                        worker_downloads.append(dict(descriptor))
-                        if local_path:
-                            worker_fallbacks[filename] = (subdir, filename, local_path)
-                    elif local_path:
-                        upload_queue.append((subdir, filename, local_path))
-                    else:
-                        print(_PREFIX, f"Model not found locally and no source: {subdir}/{filename}")
-            else:
-                for subdir, filename, local_path in missing:
+
+                if descriptor:
+                    worker_downloads.append(dict(descriptor))
                     if local_path:
-                        upload_queue.append((subdir, filename, local_path))
-                    else:
-                        print(_PREFIX, f"Model not found locally: {subdir}/{filename}")
+                        worker_fallbacks[filename] = (subdir, filename, local_path)
+                elif local_path:
+                    upload_queue.append((subdir, filename, local_path))
+                else:
+                    print(_PREFIX, f"Model not found locally and no source: {subdir}/{filename}")
 
             # Unified model status tracking — all worker fetches and local
             # uploads share a single ordered list so the job card can show
