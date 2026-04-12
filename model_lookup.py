@@ -15,10 +15,11 @@ resort. This module is opt-in and only called when the user enables the
 import hashlib
 import json
 import os
-import time
 import urllib.error
 import urllib.request
 from typing import Optional, TypedDict
+
+from .cache_utils import plugin_cache_dir, read_json_cache, read_stale_json_cache, write_json_cache
 
 _PREFIX = "[RunOnRunpod]"
 
@@ -39,18 +40,11 @@ class Descriptor(TypedDict, total=False):
     auth: str  # "hf" | "civitai" | "none"
 
 
-def _cache_dir() -> str:
-    """Return the plugin-local cache directory, creating it if needed."""
-    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
 # -----------------------------------------------------------------------------
 # Hash cache — SHA-256 on a 12GB file takes minutes, so memoize by stat key.
 # -----------------------------------------------------------------------------
 def _hash_cache_path() -> str:
-    return os.path.join(_cache_dir(), "hash-cache.json")
+    return os.path.join(plugin_cache_dir(), "hash-cache.json")
 
 
 def _load_hash_cache() -> dict:
@@ -108,7 +102,7 @@ def file_sha256(path: str) -> Optional[str]:
 # ComfyUI-Manager model database
 # -----------------------------------------------------------------------------
 def _manager_db_cache_path() -> str:
-    return os.path.join(_cache_dir(), "manager-db.json")
+    return os.path.join(plugin_cache_dir(), "manager-db.json")
 
 
 def _fetch_url_json(url: str, timeout: int = 30) -> Optional[dict]:
@@ -124,33 +118,20 @@ def _fetch_url_json(url: str, timeout: int = 30) -> Optional[dict]:
 def fetch_manager_db() -> Optional[dict]:
     """Fetch ComfyUI-Manager's model-list.json, cached for 24h."""
     cache_path = _manager_db_cache_path()
-    if os.path.exists(cache_path):
-        age = time.time() - os.path.getmtime(cache_path)
-        if age < _MANAGER_DB_TTL:
-            try:
-                with open(cache_path, "r") as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, OSError):
-                pass  # fall through and re-fetch
+    cached = read_json_cache(cache_path, _MANAGER_DB_TTL)
+    if isinstance(cached, dict):
+        return cached
 
     print(f"{_PREFIX} Fetching ComfyUI-Manager model database...")
     data = _fetch_url_json(_MANAGER_DB_URL)
     if data is None:
-        # If fetch failed but a stale cache exists, use it rather than nothing.
-        if os.path.exists(cache_path):
-            try:
-                with open(cache_path, "r") as f:
-                    print(f"{_PREFIX} Using stale Manager DB cache")
-                    return json.load(f)
-            except (json.JSONDecodeError, OSError):
-                return None
+        stale = read_stale_json_cache(cache_path)
+        if isinstance(stale, dict):
+            print(f"{_PREFIX} Using stale Manager DB cache")
+            return stale
         return None
 
-    try:
-        with open(cache_path, "w") as f:
-            json.dump(data, f)
-    except OSError as e:
-        print(f"{_PREFIX} Failed to cache Manager DB: {e}")
+    write_json_cache(cache_path, data)
     return data
 
 
@@ -199,6 +180,37 @@ def _hf_cache_root() -> str:
     return os.path.expanduser("~/.cache/huggingface/hub")
 
 
+# Per-repo cache of realpath -> in-repo relative path, built on first lookup
+# into a given ``models--org--name`` directory. HF snapshot layouts can hold
+# thousands of files across many commits, so the O(commits * files) walk is
+# expensive — we pay it once per plugin process per repo instead of once per
+# model scanned.
+_hf_snapshot_index: dict[str, dict[str, str]] = {}
+
+
+def _build_hf_snapshot_index(snapshots_root: str) -> dict[str, str]:
+    """Walk every commit under ``snapshots_root`` once, returning a map
+    from realpath (the blob the symlink resolves to) to the in-repo
+    relative path recovered from the first commit that lists it.
+    """
+    index: dict[str, str] = {}
+    if not os.path.isdir(snapshots_root):
+        return index
+    for commit in os.listdir(snapshots_root):
+        commit_dir = os.path.join(snapshots_root, commit)
+        if not os.path.isdir(commit_dir):
+            continue
+        for root, _dirs, files in os.walk(commit_dir):
+            for f in files:
+                entry = os.path.join(root, f)
+                try:
+                    real = os.path.realpath(entry)
+                except OSError:
+                    continue
+                index.setdefault(real, os.path.relpath(entry, commit_dir))
+    return index
+
+
 def lookup_hf_cache(local_path: str, subdir: str, filename: str) -> Optional[Descriptor]:
     """If ``local_path`` is (or resolves to) a file inside the HF hub cache,
     recover the repo ID and relative filename so the worker can re-download it.
@@ -231,32 +243,12 @@ def lookup_hf_cache(local_path: str, subdir: str, filename: str) -> Optional[Des
     # Strip "models--" prefix and convert double-dash back to slash.
     repo_id = repo_dir[len("models--"):].replace("--", "/", 1)
 
-    # Try to find a snapshots path for this blob to recover the in-repo filename.
-    # Scan snapshots/*/ for any entry whose realpath matches `real`.
     snapshots_root = os.path.join(hub, repo_dir, "snapshots")
-    in_repo_path: Optional[str] = None
-    if os.path.isdir(snapshots_root):
-        for commit in os.listdir(snapshots_root):
-            commit_dir = os.path.join(snapshots_root, commit)
-            if not os.path.isdir(commit_dir):
-                continue
-            for root, _dirs, files in os.walk(commit_dir):
-                for f in files:
-                    entry = os.path.join(root, f)
-                    try:
-                        if os.path.realpath(entry) == real:
-                            in_repo_path = os.path.relpath(entry, commit_dir)
-                            break
-                    except OSError:
-                        continue
-                if in_repo_path:
-                    break
-            if in_repo_path:
-                break
-
-    # Fall back to the provided filename if we can't recover the in-repo path.
-    if not in_repo_path:
-        in_repo_path = filename
+    index = _hf_snapshot_index.get(snapshots_root)
+    if index is None:
+        index = _build_hf_snapshot_index(snapshots_root)
+        _hf_snapshot_index[snapshots_root] = index
+    in_repo_path = index.get(real) or filename
 
     url = f"https://huggingface.co/{repo_id}/resolve/main/{in_repo_path}"
     return Descriptor(

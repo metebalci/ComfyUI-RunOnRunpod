@@ -236,46 +236,101 @@ async def verify_settings(request):
     return web.json_response(results)
 
 
-async def _runpod_action(endpoint_id: str, api_key: str, action: str, payload: dict | None = None) -> dict:
-    """Submit an action to the RunPod worker via /run and poll until complete.
+def _extract_error(result: dict, default: str = "Unknown error") -> str:
+    """Pull an error string out of a RunPod status response.
 
-    Returns the job output dict on success, raises RuntimeError on failure.
+    RunPod may surface the error at the top level, inside ``output`` when
+    the worker returns ``{"error": ...}``, or not at all. ``output`` may
+    legitimately be ``None`` (FAILED jobs with no worker output), so a
+    straight ``.get("output", {}).get(...)`` chain is unsafe.
     """
-    headers = {"Authorization": f"Bearer {api_key}"}
+    top = result.get("error")
+    if top:
+        return str(top)
+    output = result.get("output")
+    if isinstance(output, dict):
+        nested = output.get("error")
+        if nested:
+            return str(nested)
+    return default
+
+
+async def _submit_runpod_job(
+    session: aiohttp.ClientSession,
+    endpoint_id: str,
+    api_key: str,
+    action: str,
+    payload: dict | None,
+) -> str:
+    """POST /run to start a worker action; return the job id."""
     body: dict = {"action": action}
     if payload:
         body.update(payload)
-
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
-            f"https://api.runpod.ai/v2/{endpoint_id}/run",
-            headers=headers,
-            json={"input": body},
-        ) as resp:
-            result = await resp.json()
-
+    async with session.post(
+        f"https://api.runpod.ai/v2/{endpoint_id}/run",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"input": body},
+    ) as resp:
+        result = await resp.json()
     job_id = result.get("id")
     if not job_id:
-        raise RuntimeError(result.get("error", f"Failed to submit {action}"))
+        raise RuntimeError(_extract_error(result, f"Failed to submit {action}"))
+    return job_id
 
+
+async def _poll_runpod_job(
+    session: aiohttp.ClientSession,
+    endpoint_id: str,
+    api_key: str,
+    job_id: str,
+    on_progress=None,
+) -> dict:
+    """Poll /status until the job reaches a terminal state. On success
+    return the COMPLETED output dict; on failure raise RuntimeError.
+
+    If ``on_progress`` is given, invoke it with the IN_PROGRESS output
+    payload each time it changes, and also once with the final COMPLETED
+    output so callers that race past IN_PROGRESS still see the last state.
+    """
+    headers = {"Authorization": f"Bearer {api_key}"}
+    last_progress = None
+    delay = 0.2
+    while True:
+        async with session.get(
+            f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
+            headers=headers,
+        ) as resp:
+            status_result = await resp.json()
+
+        status = status_result.get("status", "UNKNOWN")
+        output = status_result.get("output")
+
+        if status == "IN_PROGRESS":
+            if on_progress and output and output != last_progress:
+                last_progress = output
+                try:
+                    on_progress(output)
+                except Exception as cb_exc:
+                    print(_PREFIX, f"streaming on_progress error: {cb_exc}")
+        elif status == "COMPLETED":
+            if on_progress and isinstance(output, dict) and output != last_progress:
+                try:
+                    on_progress(output)
+                except Exception as cb_exc:
+                    print(_PREFIX, f"streaming on_progress error: {cb_exc}")
+            return output if isinstance(output, dict) else {}
+        elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
+            raise RuntimeError(f"Worker error: {_extract_error(status_result, status)}")
+
+        await asyncio.sleep(delay)
+        delay = min(delay * 1.5, 2.0)
+
+
+async def _runpod_action(endpoint_id: str, api_key: str, action: str, payload: dict | None = None) -> dict:
+    """Submit an action to the worker and return its COMPLETED output."""
     async with aiohttp.ClientSession() as session:
-        delay = 0.2
-        while True:
-            async with session.get(
-                f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
-                headers=headers,
-            ) as resp:
-                status_result = await resp.json()
-
-            status = status_result.get("status", "UNKNOWN")
-            if status == "COMPLETED":
-                return status_result.get("output", {})
-            elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
-                error = status_result.get("error") or status_result.get("output", {}).get("error") or status
-                raise RuntimeError(f"Worker error: {error}")
-
-            await asyncio.sleep(delay)
-            delay = min(delay * 1.5, 2.0)
+        job_id = await _submit_runpod_job(session, endpoint_id, api_key, action, payload)
+        return await _poll_runpod_job(session, endpoint_id, api_key, job_id)
 
 
 async def _runpod_streaming_action(
@@ -285,65 +340,10 @@ async def _runpod_streaming_action(
     payload: dict,
     on_progress,
 ) -> dict:
-    """Submit an action and poll /status, invoking on_progress(output) each
-    time the IN_PROGRESS output changes (driven by the worker calling
-    runpod.serverless.progress_update). Returns the final COMPLETED output.
-    """
-    headers = {"Authorization": f"Bearer {api_key}"}
-    body: dict = {"action": action}
-    body.update(payload)
-
+    """Like ``_runpod_action`` but pipes IN_PROGRESS updates to ``on_progress``."""
     async with aiohttp.ClientSession() as session:
-        async with session.post(
-            f"https://api.runpod.ai/v2/{endpoint_id}/run",
-            headers=headers,
-            json={"input": body},
-        ) as resp:
-            result = await resp.json()
-
-    job_id = result.get("id")
-    if not job_id:
-        raise RuntimeError(result.get("error", f"Failed to submit {action}"))
-
-    last_progress = None
-    async with aiohttp.ClientSession() as session:
-        delay = 0.2
-        while True:
-            async with session.get(
-                f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
-                headers=headers,
-            ) as resp:
-                status_result = await resp.json()
-
-            status = status_result.get("status", "UNKNOWN")
-            output = status_result.get("output")
-
-            if status == "IN_PROGRESS":
-                # progress_update sets output to the current progress payload.
-                if output and output != last_progress:
-                    last_progress = output
-                    try:
-                        on_progress(output)
-                    except Exception as cb_exc:
-                        print(_PREFIX, f"streaming on_progress error: {cb_exc}")
-            elif status == "COMPLETED":
-                # Pipe the final output through on_progress too — when a
-                # fast action finishes between two polls, the runtime
-                # serves COMPLETED directly and the worker's last
-                # progress_update never reaches the client. The COMPLETED
-                # output already contains the final results state.
-                if isinstance(output, dict) and output != last_progress:
-                    try:
-                        on_progress(output)
-                    except Exception as cb_exc:
-                        print(_PREFIX, f"streaming on_progress error: {cb_exc}")
-                return output if isinstance(output, dict) else {}
-            elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
-                error = status_result.get("error") or (isinstance(output, dict) and output.get("error")) or status
-                raise RuntimeError(f"Worker error: {error}")
-
-            await asyncio.sleep(delay)
-            delay = min(delay * 1.5, 2.0)
+        job_id = await _submit_runpod_job(session, endpoint_id, api_key, action, payload)
+        return await _poll_runpod_job(session, endpoint_id, api_key, job_id, on_progress=on_progress)
 
 
 @routes.post("/RunOnRunpod/cancel-prepare")
@@ -371,44 +371,34 @@ async def submit_job(request):
         _cancelled_preps.discard(prep_id)
 
 
-async def _do_submit(data: dict):
-    settings = data.get("settings", {})
-    workflow = data.get("workflow", {})
-    prep_id = data.get("prep_id", "")
+class _SubmitError(Exception):
+    """Raised by submit-phase helpers to abort with a JSON error response.
 
-    # Optional models[] metadata from the workflow author. When the UI
-    # workflow declares the canonical download URL for each model, we
-    # treat it as the highest-priority source — see the model lookup
-    # loop below.
-    workflow_models_input = data.get("workflow_models", []) or []
-    workflow_models_by_name: dict[str, dict] = {}
-    for _m in workflow_models_input:
-        if isinstance(_m, dict) and _m.get("name") and _m.get("url"):
-            workflow_models_by_name[_m["name"]] = _m
+    Carries the status code and the user-facing message; the orchestrator
+    catches it, logs, and turns it into a ``web.json_response``.
+    """
 
-    api_key = settings.get("apiKey", "")
-    endpoint_id = settings.get("endpointId", "")
+    def __init__(self, message: str, status: int = 400, *, log: str | None = None):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+        self.log = log  # separate verbose line for the server log
 
-    if not api_key or not endpoint_id:
-        print(_PREFIX,"RunPod API Key and Endpoint ID are required")
-        return web.json_response(
-            {"error": "RunPod API Key and Endpoint ID are required"}, status=400
-        )
 
-    bucket = settings.get("bucketName", "")
-    s3_access = settings.get("s3AccessKey", "")
-    s3_secret = settings.get("s3SecretKey", "")
-    endpoint_url = settings.get("endpointUrl", "")
+def _raise_if_cancelled(prep_id: str, stage: str) -> None:
+    if prep_id in _cancelled_preps:
+        raise _SubmitError("Cancelled", 499, log=f"Submit cancelled during {stage}")
 
-    if not bucket or not s3_access or not s3_secret or not endpoint_url:
-        print(_PREFIX,"S3 credentials, endpoint URL, and bucket name are required")
-        return web.json_response(
-            {"error": "S3 credentials, endpoint URL, and bucket name are required"}, status=400
-        )
 
-    _send_event("progress", {"prep_id": prep_id, "message": "Validating credentials..."})
+def _validate_settings(settings: dict) -> None:
+    """Ensure the user filled in RunPod + S3 credentials."""
+    if not settings.get("apiKey") or not settings.get("endpointId"):
+        raise _SubmitError("RunPod API Key and Endpoint ID are required")
+    if not all(settings.get(k) for k in ("bucketName", "s3AccessKey", "s3SecretKey", "endpointUrl")):
+        raise _SubmitError("S3 credentials, endpoint URL, and bucket name are required")
 
-    # Validate RunPod API
+
+async def _validate_runpod_health(endpoint_id: str, api_key: str) -> None:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(
@@ -416,56 +406,54 @@ async def _do_submit(data: dict):
                 headers={"Authorization": f"Bearer {api_key}"},
             ) as resp:
                 if resp.status != 200:
-                    print(_PREFIX,f"RunPod API health check failed: {resp.status}")
-                    return web.json_response(
-                        {"error": f"RunPod API health check failed (status {resp.status})"}, status=400
+                    raise _SubmitError(
+                        f"RunPod API health check failed (status {resp.status})",
+                        log=f"RunPod API health check failed: {resp.status}",
                     )
+    except _SubmitError:
+        raise
     except Exception as e:
-        print(_PREFIX,f"RunPod API health check error: {e}")
-        return web.json_response(
-            {"error": f"RunPod API error: {e}"}, status=400
-        )
+        raise _SubmitError(f"RunPod API error: {e}", log=f"RunPod API health check error: {e}")
 
-    # Validate S3 access
+
+async def _validate_s3(settings: dict, bucket: str):
+    """Head-check the S3 bucket and return the ready-to-use client."""
     try:
         client = _make_s3_client(settings)
         await asyncio.to_thread(client.head_bucket, Bucket=bucket)
     except Exception as e:
-        print(_PREFIX,f"S3 storage validation failed: {e}")
-        return web.json_response(
-            {"error": f"S3 storage error: {e}"}, status=400
-        )
+        raise _SubmitError(f"S3 storage error: {e}", log=f"S3 storage validation failed: {e}")
+    return client
 
-    # Wait for worker to be available + fetch its version manifest in
-    # one round trip. The version action calls wait_for_comfy() so the
-    # cold-start time stays under "Waiting for worker..." instead of
-    # leaking into the next step.
-    _send_event("progress", {"prep_id": prep_id, "message": "Waiting for worker..."})
+
+async def _fetch_and_check_worker_version(endpoint_id: str, api_key: str) -> dict:
+    """Ping the worker and enforce strict protocol version equality.
+
+    Also caches the result in ``_last_worker_info`` and pushes a
+    ``worker_info`` event so the sidebar renders immediately.
+    """
     try:
         version_output = await _runpod_action(endpoint_id, api_key, "version")
     except Exception as e:
-        print(_PREFIX, f"Worker version request failed: {e}")
-        return web.json_response({"error": f"Worker not available: {e}"}, status=500)
+        raise _SubmitError(f"Worker not available: {e}", 500, log=f"Worker version request failed: {e}")
 
-    # Protocol version compatibility check. Strict equality — plugin
-    # and worker must declare matching protocol_version values.
     if not isinstance(version_output, dict):
-        return web.json_response({"error": "Worker returned invalid version response."}, status=500)
+        raise _SubmitError("Worker returned invalid version response.", 500)
+
     worker_protocol = version_output.get("protocol_version")
     if not isinstance(worker_protocol, int) or worker_protocol == 0:
-        msg = "Worker doesn't report a protocol version. Update your worker image."
-        print(_PREFIX, "ERROR:", msg)
-        return web.json_response({"error": msg}, status=400)
+        raise _SubmitError(
+            "Worker doesn't report a protocol version. Update your worker image.",
+            log="ERROR: Worker doesn't report a protocol version",
+        )
     if worker_protocol != PROTOCOL_VERSION:
-        if worker_protocol < PROTOCOL_VERSION:
-            msg = f"Plugin/worker protocol mismatch (plugin={PROTOCOL_VERSION}, worker={worker_protocol}). Update your worker image."
-        else:
-            msg = f"Plugin/worker protocol mismatch (plugin={PROTOCOL_VERSION}, worker={worker_protocol}). Update your plugin."
-        print(_PREFIX, "ERROR:", msg)
-        return web.json_response({"error": msg}, status=400)
+        direction = "worker image" if worker_protocol < PROTOCOL_VERSION else "plugin"
+        msg = (
+            f"Plugin/worker protocol mismatch (plugin={PROTOCOL_VERSION}, "
+            f"worker={worker_protocol}). Update your {direction}."
+        )
+        raise _SubmitError(msg, log=f"ERROR: {msg}")
 
-    # Cache the worker info so the sidebar can display it without
-    # forcing another cold start, and push it to the panel now.
     _last_worker_info.update({
         "worker_version": version_output.get("worker_version", "unknown"),
         "protocol_version": worker_protocol,
@@ -474,246 +462,329 @@ async def _do_submit(data: dict):
         "comfyui_version": version_output.get("comfyui_version", "unknown"),
     })
     _send_event("worker_info", _last_worker_info)
+    return version_output
 
-    if prep_id in _cancelled_preps:
-        print(_PREFIX, "Submit cancelled during worker ping")
-        return web.json_response({"error": "Cancelled"}, status=499)
 
-    # Check node compatibility with the worker
-    _send_event("progress", {"prep_id": prep_id, "message": "Checking custom nodes..."})
+async def _check_node_compatibility(endpoint_id: str, api_key: str, workflow: dict) -> None:
     try:
         output = await _runpod_action(endpoint_id, api_key, "node_list")
-        worker_nodes = set(output.get("node_list", []))
-        workflow_nodes = {node.get("class_type") for node in workflow.values() if node.get("class_type")}
-        missing_nodes = sorted(workflow_nodes - worker_nodes)
-        if missing_nodes:
-            msg = f"Missing custom nodes on worker: {', '.join(missing_nodes)}"
-            print(_PREFIX, msg)
-            return web.json_response({"error": msg}, status=400)
     except Exception as e:
-        print(_PREFIX, f"Node list check failed: {e}")
-        return web.json_response({"error": f"Node check failed: {e}"}, status=500)
+        raise _SubmitError(f"Node check failed: {e}", 500, log=f"Node list check failed: {e}")
+    worker_nodes = set(output.get("node_list", []))
+    workflow_nodes = {node.get("class_type") for node in workflow.values() if node.get("class_type")}
+    missing_nodes = sorted(workflow_nodes - worker_nodes)
+    if missing_nodes:
+        msg = f"Missing custom nodes on worker: {', '.join(missing_nodes)}"
+        raise _SubmitError(msg, log=msg)
 
-    if prep_id in _cancelled_preps:
-        print(_PREFIX, "Submit cancelled during node check")
-        return web.json_response({"error": "Cancelled"}, status=499)
 
-    # Upload input files to network volume via S3
-    input_files = {}
+async def _upload_input_files(settings: dict, bucket: str, workflow: dict, prep_id: str) -> dict:
+    """Upload every LoadImage/LoadVideo/etc. referenced by the workflow.
+
+    Returns a ``{filename: s3_key}`` mapping the worker can read back.
+    """
+    input_files: dict[str, str] = {}
     input_file_refs = _scan_input_files(workflow)
+    if not input_file_refs:
+        return input_files
 
-    if input_file_refs:
-        input_dir = _get_input_directory()
+    input_dir = _get_input_directory()
+    for filename in input_file_refs:
+        _raise_if_cancelled(prep_id, "input upload")
+        file_path = os.path.join(input_dir, filename)
+        if not os.path.exists(file_path):
+            raise _SubmitError(f"Input file not found: {filename}")
+        _send_event("progress", {"prep_id": prep_id, "message": f"Uploading input: {filename}"})
+        s3_key = await asyncio.to_thread(upload_file_dedup, _s3_settings(settings), bucket, file_path)
+        input_files[filename] = s3_key
+    return input_files
 
-        for filename in input_file_refs:
-            if prep_id in _cancelled_preps:
-                print(_PREFIX, "Submit cancelled during input upload")
-                return web.json_response({"error": "Cancelled"}, status=499)
-            file_path = os.path.join(input_dir, filename)
-            if not os.path.exists(file_path):
-                return web.json_response(
-                    {"error": f"Input file not found: {filename}"}, status=400
-                )
-            _send_event("progress", {"prep_id": prep_id, "message": f"Uploading input: {filename}"})
-            s3_key = await asyncio.to_thread(upload_file_dedup, _s3_settings(settings), bucket, file_path)
-            input_files[filename] = s3_key
 
-    # Upload missing models to network volume
-    if settings.get("uploadMissingModels", True):
-        model_refs = _scan_model_files(workflow)
-        if model_refs:
-            # Pass 1: identify which models are actually missing and, if the
-            # "Download from the source" option is enabled, try to look up a
-            # remote source for each one. Models with a hit go to the worker's
-            # fetch_models action; models without a hit go to the local upload
-            # path as before.
-            missing: list[tuple[str, str, str | None]] = []  # (subdir, filename, local_path)
-            for (subdir, filename) in model_refs:
-                if prep_id in _cancelled_preps:
-                    print(_PREFIX, "Submit cancelled during model scan")
-                    return web.json_response({"error": "Cancelled"}, status=499)
-                s3_key = f"models/{subdir}/{filename}"
-                exists = await asyncio.to_thread(key_exists, client, bucket, s3_key)
-                if exists:
-                    print(_PREFIX, f"Model already on volume: {s3_key}")
-                    continue
-                local_path = _find_model_file(subdir, filename)
-                missing.append((subdir, filename, local_path))
+async def _identify_missing_models(
+    client,
+    bucket: str,
+    model_refs: dict,
+    prep_id: str,
+) -> list[tuple[str, str, str | None]]:
+    """Return ``[(subdir, filename, local_path_or_None)]`` for every model
+    that isn't already on the network volume.
+    """
+    missing: list[tuple[str, str, str | None]] = []
+    for (subdir, filename) in model_refs:
+        _raise_if_cancelled(prep_id, "model scan")
+        s3_key = f"models/{subdir}/{filename}"
+        if await asyncio.to_thread(key_exists, client, bucket, s3_key):
+            print(_PREFIX, f"Model already on volume: {s3_key}")
+            continue
+        local_path = _find_model_file(subdir, filename)
+        missing.append((subdir, filename, local_path))
+    return missing
 
-            use_source = settings.get("downloadModelsFromTheSource", False)
-            civitai_key = settings.get("civitaiApiKey") or None
-            worker_downloads: list[dict] = []
-            upload_queue: list[tuple[str, str, str]] = []  # (subdir, filename, local_path)
-            # filename -> (subdir, filename, local_path) so worker failures
-            # can fall back to the original local file for an upload retry.
-            worker_fallbacks: dict[str, tuple[str, str, str]] = {}
 
-            if missing:
-                _send_event("progress", {
-                    "prep_id": prep_id,
-                    "message": f"Resolving sources for {len(missing)} model(s)...",
-                })
+def _workflow_metadata_descriptor(subdir: str, filename: str, wm: dict | None) -> dict | None:
+    """Build a worker download descriptor from workflow-author metadata.
 
-            for subdir, filename, local_path in missing:
-                if prep_id in _cancelled_preps:
-                    print(_PREFIX, "Submit cancelled during source lookup")
-                    return web.json_response({"error": "Cancelled"}, status=499)
-
-                descriptor = None
-
-                # Step 0: workflow metadata. Authoritative — the
-                # workflow author named the file and the canonical
-                # URL. Tried regardless of the "Download models from
-                # the source" setting because it's not a third-party
-                # lookup.
-                wm = workflow_models_by_name.get(filename)
-                if wm and wm.get("url"):
-                    descriptor = {
-                        "source": "workflow",
-                        "url": wm["url"],
-                        "dest_path": f"models/{subdir}/{filename}",
-                        "expected_sha256": wm.get("hash") or wm.get("sha256"),
-                        "auth": "hf" if "huggingface.co" in wm["url"] else "none",
-                    }
-                    print(_PREFIX, f"Workflow metadata hit: {filename} -> {wm['url']}")
-
-                # Steps 1-3: lookup chain — only when the user opted in.
-                if descriptor is None and use_source:
-                    descriptor = await asyncio.to_thread(
-                        lookup_model, subdir, filename, local_path, civitai_key
-                    )
-
-                if descriptor:
-                    worker_downloads.append(dict(descriptor))
-                    if local_path:
-                        worker_fallbacks[filename] = (subdir, filename, local_path)
-                elif local_path:
-                    upload_queue.append((subdir, filename, local_path))
-                else:
-                    print(_PREFIX, f"Model not found locally and no source: {subdir}/{filename}")
-
-            # Unified model status tracking — all worker fetches and local
-            # uploads share a single ordered list so the job card can show
-            # every model with a per-file status icon.
-            planned_order: list[str] = []
-            model_status: dict[str, dict] = {}
-            for d in worker_downloads:
-                fname = os.path.basename(d["dest_path"])
-                if fname not in model_status:
-                    planned_order.append(fname)
-                    model_status[fname] = {"filename": fname, "status": "pending"}
-            for (_subdir, filename, _local_path) in upload_queue:
-                if filename not in model_status:
-                    planned_order.append(filename)
-                    model_status[filename] = {"filename": filename, "status": "pending"}
-
-            def _emit_model_progress(label: str, _pid=prep_id):
-                ordered = [model_status[f] for f in planned_order]
-                done = sum(1 for r in ordered if r.get("status") == "done")
-                _send_event("fetch_progress", {
-                    "prep_id": _pid,
-                    "message": f"{label} {done}/{len(ordered)}",
-                    "done": done,
-                    "total": len(ordered),
-                    "results": ordered,
-                })
-
-            # Worker-side downloads.
-            if worker_downloads:
-                def _fetch_progress(output: dict):
-                    by_name = {r.get("filename"): r for r in (output.get("results") or [])}
-                    current = output.get("current_filename") or ""
-                    for fname in [os.path.basename(d["dest_path"]) for d in worker_downloads]:
-                        existing = by_name.get(fname)
-                        if existing:
-                            model_status[fname] = existing
-                        elif fname == current and model_status[fname].get("status") == "pending":
-                            model_status[fname] = {"filename": fname, "status": "downloading"}
-                    label = "Fetching models"
-                    if current:
-                        label = f"Fetching {current} —"
-                    _emit_model_progress(label)
-
-                _emit_model_progress("Fetching models")
-
-                try:
-                    fetch_output = await _runpod_streaming_action(
-                        endpoint_id,
-                        api_key,
-                        "fetch_models",
-                        {
-                            "downloads": worker_downloads,
-                            "hf_token": settings.get("hfToken") or "",
-                            "civitai_key": settings.get("civitaiApiKey") or "",
-                        },
-                        _fetch_progress,
-                    )
-                except Exception as e:
-                    print(_PREFIX, f"fetch_models action failed: {e}")
-                    # Full failure of the action — fall back to uploading
-                    # everything we had planned for worker download.
-                    fetch_output = {"results": [
-                        {"filename": os.path.basename(d["dest_path"]), "status": "failed", "error": str(e)}
-                        for d in worker_downloads
-                    ]}
-
-                for result in (fetch_output.get("results") or []):
-                    if result.get("status") != "done":
-                        fname = result.get("filename", "")
-                        fallback = worker_fallbacks.get(fname)
-                        if fallback:
-                            print(_PREFIX, f"Worker failed {fname} ({result.get('error')}); falling back to local upload")
-                            upload_queue.append(fallback)
-                            if fname not in model_status:
-                                planned_order.append(fname)
-                            model_status[fname] = {"filename": fname, "status": "pending"}
-                        else:
-                            print(_PREFIX, f"Worker failed {fname} with no local fallback available")
-
-            # Local upload path (for misses + worker failures).
-            if upload_queue:
-                _emit_model_progress("Uploading models")
-            for subdir, filename, local_path in upload_queue:
-                if prep_id in _cancelled_preps:
-                    print(_PREFIX, "Submit cancelled during model upload")
-                    return web.json_response({"error": "Cancelled"}, status=499)
-                s3_key = f"models/{subdir}/{filename}"
-                model_status[filename] = {"filename": filename, "status": "uploading"}
-                _emit_model_progress(f"Uploading {filename} —")
-                print(_PREFIX, f"Uploading missing model: {local_path} -> {s3_key}")
-
-                def _model_progress(uploaded, total, _fn=filename, _pid=prep_id):
-                    pct = int(uploaded / total * 100) if total else 100
-                    mb_done = uploaded / (1024 * 1024)
-                    mb_total = total / (1024 * 1024)
-                    _send_event("upload_progress", {
-                        "prep_id": _pid,
-                        "message": f"Uploading model: {_fn}",
-                        "percent": pct,
-                        "uploaded_mb": round(mb_done, 1),
-                        "total_mb": round(mb_total, 1),
-                    })
-
-                try:
-                    await asyncio.to_thread(upload_file, _s3_settings(settings), bucket, s3_key, local_path, _model_progress)
-                    model_status[filename] = {"filename": filename, "status": "done"}
-                except Exception as e:
-                    print(_PREFIX, f"Upload failed for {filename}: {e}")
-                    model_status[filename] = {"filename": filename, "status": "failed", "error": str(e)}
-                    _emit_model_progress("Uploading models")
-                    raise
-                _emit_model_progress("Uploading models")
-
-    _send_event("progress", {"prep_id": prep_id, "message": "Submitting to RunPod..."})
-
-    # Submit to RunPod
-    payload = {
-        "input": {
-            "workflow": workflow,
-            "input_files": input_files,
-        }
+    Returns None if the metadata doesn't provide a usable URL. Workflow
+    metadata is authoritative — it's tried before any third-party lookup.
+    """
+    if not wm or not wm.get("url"):
+        return None
+    url = wm["url"]
+    return {
+        "source": "workflow",
+        "url": url,
+        "dest_path": f"models/{subdir}/{filename}",
+        "expected_sha256": wm.get("hash") or wm.get("sha256"),
+        "auth": "hf" if "huggingface.co" in url else "none",
     }
 
+
+async def _resolve_model_sources(
+    missing: list[tuple[str, str, str | None]],
+    workflow_models_by_name: dict[str, dict],
+    settings: dict,
+    prep_id: str,
+) -> tuple[list[dict], list[tuple[str, str, str]], dict[str, tuple[str, str, str]]]:
+    """Split every missing model into worker-fetch vs local-upload buckets.
+
+    Preference order: workflow metadata → opt-in lookup chain (Manager /
+    HF cache / CivitAI) → local upload. A model that can be fetched by
+    the worker AND has a local copy gets recorded in ``worker_fallbacks``
+    so a worker failure can fall back to a local upload.
+    """
+    use_source = settings.get("downloadModelsFromTheSource", False)
+    civitai_key = settings.get("civitaiApiKey") or None
+
+    if missing:
+        _send_event("progress", {
+            "prep_id": prep_id,
+            "message": f"Resolving sources for {len(missing)} model(s)...",
+        })
+
+    worker_downloads: list[dict] = []
+    upload_queue: list[tuple[str, str, str]] = []
+    worker_fallbacks: dict[str, tuple[str, str, str]] = {}
+
+    for subdir, filename, local_path in missing:
+        _raise_if_cancelled(prep_id, "source lookup")
+
+        descriptor = _workflow_metadata_descriptor(subdir, filename, workflow_models_by_name.get(filename))
+        if descriptor:
+            print(_PREFIX, f"Workflow metadata hit: {filename} -> {descriptor['url']}")
+
+        if descriptor is None and use_source:
+            descriptor = await asyncio.to_thread(
+                lookup_model, subdir, filename, local_path, civitai_key
+            )
+
+        if descriptor:
+            worker_downloads.append(dict(descriptor))
+            if local_path:
+                worker_fallbacks[filename] = (subdir, filename, local_path)
+        elif local_path:
+            upload_queue.append((subdir, filename, local_path))
+        else:
+            print(_PREFIX, f"Model not found locally and no source: {subdir}/{filename}")
+
+    return worker_downloads, upload_queue, worker_fallbacks
+
+
+def _build_model_status(
+    worker_downloads: list[dict],
+    upload_queue: list[tuple[str, str, str]],
+) -> tuple[list[str], dict[str, dict]]:
+    """Seed a single ordered list + status map covering every planned
+    worker fetch and local upload, so the job card can show one unified
+    per-file list with icons.
+    """
+    planned_order: list[str] = []
+    model_status: dict[str, dict] = {}
+    for d in worker_downloads:
+        fname = os.path.basename(d["dest_path"])
+        if fname not in model_status:
+            planned_order.append(fname)
+            model_status[fname] = {"filename": fname, "status": "pending"}
+    for (_subdir, filename, _local_path) in upload_queue:
+        if filename not in model_status:
+            planned_order.append(filename)
+            model_status[filename] = {"filename": filename, "status": "pending"}
+    return planned_order, model_status
+
+
+def _make_progress_emitter(prep_id: str, planned_order: list[str], model_status: dict[str, dict]):
+    """Return an ``emit(label)`` closure that sends a ``fetch_progress``
+    event reflecting the current state of ``model_status``.
+    """
+    def emit(label: str) -> None:
+        ordered = [model_status[f] for f in planned_order]
+        done = sum(1 for r in ordered if r.get("status") == "done")
+        _send_event("fetch_progress", {
+            "prep_id": prep_id,
+            "message": f"{label} {done}/{len(ordered)}",
+            "done": done,
+            "total": len(ordered),
+            "results": ordered,
+        })
+    return emit
+
+
+async def _run_worker_fetches(
+    endpoint_id: str,
+    api_key: str,
+    settings: dict,
+    worker_downloads: list[dict],
+    worker_fallbacks: dict[str, tuple[str, str, str]],
+    upload_queue: list[tuple[str, str, str]],
+    planned_order: list[str],
+    model_status: dict[str, dict],
+    emit_progress,
+) -> None:
+    """Drive the worker's ``fetch_models`` action and, for any files the
+    worker couldn't pull, append a local-upload fallback to ``upload_queue``.
+    """
+    def _on_fetch_progress(output: dict) -> None:
+        by_name = {r.get("filename"): r for r in (output.get("results") or [])}
+        current = output.get("current_filename") or ""
+        for d in worker_downloads:
+            fname = os.path.basename(d["dest_path"])
+            existing = by_name.get(fname)
+            if existing:
+                model_status[fname] = existing
+            elif fname == current and model_status[fname].get("status") == "pending":
+                model_status[fname] = {"filename": fname, "status": "downloading"}
+        emit_progress(f"Fetching {current} —" if current else "Fetching models")
+
+    emit_progress("Fetching models")
+
+    try:
+        fetch_output = await _runpod_streaming_action(
+            endpoint_id,
+            api_key,
+            "fetch_models",
+            {
+                "downloads": worker_downloads,
+                "hf_token": settings.get("hfToken") or "",
+                "civitai_key": settings.get("civitaiApiKey") or "",
+            },
+            _on_fetch_progress,
+        )
+    except Exception as e:
+        print(_PREFIX, f"fetch_models action failed: {e}")
+        # Full action failure — mark every planned download as failed
+        # so the fallback loop below re-routes them to local upload.
+        fetch_output = {"results": [
+            {"filename": os.path.basename(d["dest_path"]), "status": "failed", "error": str(e)}
+            for d in worker_downloads
+        ]}
+
+    for result in (fetch_output.get("results") or []):
+        if result.get("status") == "done":
+            continue
+        fname = result.get("filename", "")
+        fallback = worker_fallbacks.get(fname)
+        if fallback:
+            print(_PREFIX, f"Worker failed {fname} ({result.get('error')}); falling back to local upload")
+            upload_queue.append(fallback)
+            if fname not in model_status:
+                planned_order.append(fname)
+            model_status[fname] = {"filename": fname, "status": "pending"}
+        else:
+            print(_PREFIX, f"Worker failed {fname} with no local fallback available")
+
+
+async def _upload_local_models(
+    settings: dict,
+    bucket: str,
+    upload_queue: list[tuple[str, str, str]],
+    prep_id: str,
+    model_status: dict[str, dict],
+    emit_progress,
+) -> None:
+    """Upload every (subdir, filename, local_path) in the queue to S3.
+
+    Updates ``model_status`` in place and emits a per-file progress
+    event while each upload is in flight.
+    """
+    if not upload_queue:
+        return
+    emit_progress("Uploading models")
+
+    for subdir, filename, local_path in upload_queue:
+        _raise_if_cancelled(prep_id, "model upload")
+        s3_key = f"models/{subdir}/{filename}"
+        model_status[filename] = {"filename": filename, "status": "uploading"}
+        emit_progress(f"Uploading {filename} —")
+        print(_PREFIX, f"Uploading missing model: {local_path} -> {s3_key}")
+
+        def _model_progress(uploaded, total, _fn=filename, _pid=prep_id):
+            pct = int(uploaded / total * 100) if total else 100
+            _send_event("upload_progress", {
+                "prep_id": _pid,
+                "message": f"Uploading model: {_fn}",
+                "percent": pct,
+                "uploaded_mb": round(uploaded / (1024 * 1024), 1),
+                "total_mb": round(total / (1024 * 1024), 1),
+            })
+
+        try:
+            await asyncio.to_thread(
+                upload_file, _s3_settings(settings), bucket, s3_key, local_path, _model_progress
+            )
+            model_status[filename] = {"filename": filename, "status": "done"}
+        except Exception as e:
+            print(_PREFIX, f"Upload failed for {filename}: {e}")
+            model_status[filename] = {"filename": filename, "status": "failed", "error": str(e)}
+            emit_progress("Uploading models")
+            raise
+        emit_progress("Uploading models")
+
+
+async def _prepare_models(
+    settings: dict,
+    bucket: str,
+    client,
+    workflow: dict,
+    workflow_models_by_name: dict[str, dict],
+    endpoint_id: str,
+    api_key: str,
+    prep_id: str,
+) -> None:
+    """Orchestrate the full model-preparation phase:
+    scan → resolve sources → worker fetches → local uploads.
+    """
+    model_refs = _scan_model_files(workflow)
+    if not model_refs:
+        return
+
+    missing = await _identify_missing_models(client, bucket, model_refs, prep_id)
+    worker_downloads, upload_queue, worker_fallbacks = await _resolve_model_sources(
+        missing, workflow_models_by_name, settings, prep_id,
+    )
+    planned_order, model_status = _build_model_status(worker_downloads, upload_queue)
+    emit_progress = _make_progress_emitter(prep_id, planned_order, model_status)
+
+    if worker_downloads:
+        await _run_worker_fetches(
+            endpoint_id, api_key, settings,
+            worker_downloads, worker_fallbacks, upload_queue,
+            planned_order, model_status, emit_progress,
+        )
+
+    await _upload_local_models(
+        settings, bucket, upload_queue, prep_id, model_status, emit_progress,
+    )
+
+
+async def _submit_workflow_to_runpod(
+    endpoint_id: str,
+    api_key: str,
+    workflow: dict,
+    input_files: dict,
+    settings: dict,
+    prep_id: str,
+) -> web.Response:
+    """POST /run with the workflow payload and start the background poller."""
+    payload = {"input": {"workflow": workflow, "input_files": input_files}}
     async with aiohttp.ClientSession() as session:
         async with session.post(
             f"https://api.runpod.ai/v2/{endpoint_id}/run",
@@ -723,15 +794,12 @@ async def _do_submit(data: dict):
             result = await resp.json()
 
     if "id" not in result:
-        return web.json_response(
-            {"error": result.get("error", "Failed to submit job")}, status=500
-        )
+        raise _SubmitError(_extract_error(result, "Failed to submit job"), 500)
 
     job_id = result["id"]
     print(_PREFIX, f"Job submitted: {job_id}")
     _send_event("queued", {"job_id": job_id, "prep_id": prep_id})
 
-    # Start background task to poll RunPod and handle completion
     task = asyncio.create_task(_poll_and_finish(job_id, settings, input_files))
     _active_tasks[job_id] = task
 
@@ -739,6 +807,57 @@ async def _do_submit(data: dict):
         "job_id": job_id,
         "status": result.get("status", "IN_QUEUE"),
     })
+
+
+def _workflow_models_by_name(data: dict) -> dict[str, dict]:
+    """Index the optional ``workflow_models`` metadata payload by filename."""
+    indexed: dict[str, dict] = {}
+    for entry in data.get("workflow_models") or []:
+        if isinstance(entry, dict) and entry.get("name") and entry.get("url"):
+            indexed[entry["name"]] = entry
+    return indexed
+
+
+async def _do_submit(data: dict):
+    settings = data.get("settings", {})
+    workflow = data.get("workflow", {})
+    prep_id = data.get("prep_id", "")
+    workflow_models_by_name = _workflow_models_by_name(data)
+
+    api_key = settings.get("apiKey", "")
+    endpoint_id = settings.get("endpointId", "")
+    bucket = settings.get("bucketName", "")
+
+    try:
+        _validate_settings(settings)
+
+        _send_event("progress", {"prep_id": prep_id, "message": "Validating credentials..."})
+        await _validate_runpod_health(endpoint_id, api_key)
+        client = await _validate_s3(settings, bucket)
+
+        _send_event("progress", {"prep_id": prep_id, "message": "Waiting for worker..."})
+        await _fetch_and_check_worker_version(endpoint_id, api_key)
+        _raise_if_cancelled(prep_id, "worker ping")
+
+        _send_event("progress", {"prep_id": prep_id, "message": "Checking custom nodes..."})
+        await _check_node_compatibility(endpoint_id, api_key, workflow)
+        _raise_if_cancelled(prep_id, "node check")
+
+        input_files = await _upload_input_files(settings, bucket, workflow, prep_id)
+
+        if settings.get("uploadMissingModels", True):
+            await _prepare_models(
+                settings, bucket, client, workflow, workflow_models_by_name,
+                endpoint_id, api_key, prep_id,
+            )
+
+        _send_event("progress", {"prep_id": prep_id, "message": "Submitting to RunPod..."})
+        return await _submit_workflow_to_runpod(
+            endpoint_id, api_key, workflow, input_files, settings, prep_id,
+        )
+    except _SubmitError as e:
+        print(_PREFIX, e.log or e.message)
+        return web.json_response({"error": e.message}, status=e.status)
 
 
 async def _poll_and_finish(job_id: str, settings: dict, input_files: dict):
@@ -776,9 +895,9 @@ async def _poll_and_finish(job_id: str, settings: dict, input_files: dict):
                 _send_event("completed", {"job_id": job_id, "files": downloaded})
                 return
             elif status == "FAILED":
-                error = result.get("error") or result.get("output", {}).get("error") or "Job failed"
+                error = _extract_error(result, "Job failed")
                 print(_PREFIX, f"Job {job_id}: FAILED: {error}")
-                _send_event("failed", {"job_id": job_id, "error": str(error)})
+                _send_event("failed", {"job_id": job_id, "error": error})
                 return
             elif status == "CANCELLED":
                 print(_PREFIX, f"Job {job_id}: CANCELLED")
@@ -1055,8 +1174,7 @@ async def recover_jobs(request):
                     print(_PREFIX, f"recover-jobs: re-attached polling for {job_id}")
             elif status == "FAILED":
                 entry["state"] = "failed"
-                error = result.get("error") or (result.get("output", {}) or {}).get("error") or "Job failed"
-                entry["error"] = str(error)
+                entry["error"] = _extract_error(result, "Job failed")
             elif status == "CANCELLED":
                 entry["state"] = "cancelled"
             elif status == "TIMED_OUT":

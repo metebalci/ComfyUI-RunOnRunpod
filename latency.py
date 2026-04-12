@@ -31,7 +31,6 @@ the user staring at a blank popup for the whole run.
 """
 
 import asyncio
-import json
 import os
 import re
 import statistics
@@ -41,6 +40,8 @@ import urllib.request
 from typing import Optional
 
 import aiohttp
+
+from .cache_utils import plugin_cache_dir, read_json_cache, read_stale_json_cache, write_json_cache
 
 _PREFIX = "[RunOnRunpod]"
 
@@ -63,14 +64,8 @@ _HOST_RE = re.compile(
 )
 
 
-def _cache_dir() -> str:
-    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
 def _regions_cache_path() -> str:
-    return os.path.join(_cache_dir(), "regions.json")
+    return os.path.join(plugin_cache_dir(), "regions.json")
 
 
 def _is_valid_region_host(host: str) -> bool:
@@ -106,31 +101,23 @@ def fetch_regions() -> list[dict]:
     Raises RuntimeError if neither fresh scrape nor cached data is available.
     """
     cache_path = _regions_cache_path()
-    if os.path.exists(cache_path):
-        age = time.time() - os.path.getmtime(cache_path)
-        if age < _REGIONS_CACHE_TTL:
-            try:
-                with open(cache_path, "r") as f:
-                    cached = _filter_regions(json.load(f))
-                if cached:
-                    return cached
-                # Cache exists but every entry is invalid — fall through
-                # to a fresh scrape (e.g. older cache from a looser regex).
-            except (json.JSONDecodeError, OSError):
-                pass  # fall through to re-fetch
+    fresh = read_json_cache(cache_path, _REGIONS_CACHE_TTL)
+    if isinstance(fresh, list):
+        filtered = _filter_regions(fresh)
+        if filtered:
+            return filtered
+        # Cache exists but every entry is invalid — fall through to a
+        # fresh scrape (e.g. older cache from a looser regex).
 
     html = _fetch_docs_page()
     if html is None:
         # Last-ditch: use stale cache if it exists.
-        if os.path.exists(cache_path):
-            try:
-                with open(cache_path, "r") as f:
-                    cached = _filter_regions(json.load(f))
-                if cached:
-                    print(f"{_PREFIX} Using stale regions cache")
-                    return cached
-            except (json.JSONDecodeError, OSError):
-                pass
+        stale = read_stale_json_cache(cache_path)
+        if isinstance(stale, list):
+            filtered = _filter_regions(stale)
+            if filtered:
+                print(f"{_PREFIX} Using stale regions cache")
+                return filtered
         raise RuntimeError(
             "Could not fetch the Runpod S3 regions list from "
             f"{_REGIONS_DOCS_URL} and no cached copy is available"
@@ -152,12 +139,7 @@ def fetch_regions() -> list[dict]:
             "docs page format may have changed"
         )
 
-    try:
-        with open(cache_path, "w") as f:
-            json.dump(regions, f)
-    except OSError as e:
-        print(f"{_PREFIX} Failed to cache regions list: {e}")
-
+    write_json_cache(cache_path, regions)
     return regions
 
 

@@ -94,24 +94,22 @@ function saveJobs() {
     }
 }
 
-async function loadJobs() {
+function _readStoredJobs() {
     let raw;
     try {
         raw = localStorage.getItem(STORAGE_KEY);
     } catch (err) {
-        return;
+        return null;
     }
-    if (!raw) return;
-
+    if (!raw) return null;
     let parsed;
     try {
         parsed = JSON.parse(raw);
     } catch (err) {
-        return;
+        return null;
     }
-    if (!Array.isArray(parsed)) return;
-
-    const restored = parsed.map(j => ({
+    if (!Array.isArray(parsed)) return null;
+    return parsed.map(j => ({
         id: j.id,
         state: j.state,
         message: j.message || "",
@@ -120,7 +118,9 @@ async function loadJobs() {
         fetchResults: null,
         createdAt: new Date(j.createdAt),
     }));
+}
 
+async function _filterJobsByExistingFiles(restored) {
     // Verify completed-job files still exist on disk; drop missing files
     // and drop the whole card if a completed job ends up with zero files.
     const allFiles = [...new Set(restored.flatMap(j => j.files))];
@@ -137,86 +137,93 @@ async function loadJobs() {
             console.error("[RunOnRunpod] check-local-outputs error:", err);
         }
     }
-
-    const filtered = restored.filter(j => {
+    return restored.filter(j => {
         j.files = j.files.filter(f => existingSet.has(f));
         if (j.state === JOB_STATE.COMPLETED && j.files.length === 0) return false;
         return true;
     });
+}
 
-    jobs = filtered;
-    renderJobList();
-    saveJobs();
+function _recoveryMessageFor(state, entry) {
+    switch (state) {
+        case "completed": return `Completed - ${(entry.files || []).length} output file(s)`;
+        case "failed":    return `Failed: ${entry.error || "unknown error"}`;
+        case "cancelled": return "Cancelled";
+        case "timed_out": return "Timed out";
+        case "queued":    return "Queued on RunPod (recovered)";
+        case "running":   return "Running (recovered)";
+        default:          return null;
+    }
+}
 
-    // Recover in-flight jobs after a reload. Real RunPod job IDs are
-    // queried via /status; prep-* IDs are checked against the
-    // backend's in-memory _active_preps set so we can drop preps that
-    // died (e.g., the ComfyUI process restarted) while keeping the
-    // ones the backend is still working on.
+function _applyRecoveredEntry(entry) {
+    const job = findJob(entry.job_id);
+    if (!job) return;
+    if (entry.state === "lost") {
+        const idx = jobs.findIndex(j => j.id === entry.job_id);
+        if (idx >= 0) jobs.splice(idx, 1);
+        return;
+    }
+    const updates = { state: entry.state };
+    if (entry.state === "completed") updates.files = entry.files || [];
+    const msg = _recoveryMessageFor(entry.state, entry);
+    if (msg !== null) updates.message = msg;
+    Object.assign(job, updates);
+}
+
+function _applyRecoveredPrep(entry) {
+    if (entry.state !== "lost") return;
+    // state === "preparing" → backend is still working on it; leave the
+    // card alone, the next websocket event will overwrite the message.
+    const idx = jobs.findIndex(j => j.id === entry.prep_id);
+    if (idx >= 0) jobs.splice(idx, 1);
+}
+
+async function _recoverInFlightJobs() {
+    // Real RunPod job IDs are queried via /status; prep-* IDs are
+    // checked against the backend's in-memory _active_preps set so we
+    // can drop preps that died (e.g., the ComfyUI process restarted)
+    // while keeping the ones the backend is still working on.
     const inFlight = jobs.filter(j => ACTIVE_STATES.includes(j.state));
     const jobIds = inFlight.filter(j => !j.id.startsWith("prep-")).map(j => j.id);
     const prepIds = inFlight.filter(j => j.id.startsWith("prep-")).map(j => j.id);
-    if (jobIds.length > 0 || prepIds.length > 0) {
-        for (const j of inFlight) {
-            if (!j.id.startsWith("prep-")) {
-                j.message = "Querying job state on RunPod...";
-            }
-        }
-        renderJobList();
+    if (jobIds.length === 0 && prepIds.length === 0) return;
 
-        try {
-            const resp = await api.fetchApi("/RunOnRunpod/recover-jobs", {
-                method: "POST",
-                body: JSON.stringify({
-                    settings: getSettings(),
-                    job_ids: jobIds,
-                    prep_ids: prepIds,
-                }),
-            });
-            const data = await resp.json();
-
-            for (const entry of data.recovered || []) {
-                const job = findJob(entry.job_id);
-                if (!job) continue;
-                if (entry.state === "lost") {
-                    const idx = jobs.findIndex(j => j.id === entry.job_id);
-                    if (idx >= 0) jobs.splice(idx, 1);
-                    continue;
-                }
-                const updates = { state: entry.state };
-                if (entry.state === "completed") {
-                    updates.files = entry.files || [];
-                    updates.message = `Completed - ${(entry.files || []).length} output file(s)`;
-                } else if (entry.state === "failed") {
-                    updates.message = `Failed: ${entry.error || "unknown error"}`;
-                } else if (entry.state === "cancelled") {
-                    updates.message = "Cancelled";
-                } else if (entry.state === "timed_out") {
-                    updates.message = "Timed out";
-                } else if (entry.state === "queued") {
-                    updates.message = "Queued on RunPod (recovered)";
-                } else if (entry.state === "running") {
-                    updates.message = "Running (recovered)";
-                }
-                Object.assign(job, updates);
-            }
-
-            for (const entry of data.preps || []) {
-                if (entry.state === "lost") {
-                    const idx = jobs.findIndex(j => j.id === entry.prep_id);
-                    if (idx >= 0) jobs.splice(idx, 1);
-                }
-                // state === "preparing" → backend is still working on
-                // it; leave the card alone, the next websocket event
-                // will overwrite the message.
-            }
-
-            renderJobList();
-            saveJobs();
-        } catch (err) {
-            console.error("[RunOnRunpod] recover-jobs error:", err);
+    for (const j of inFlight) {
+        if (!j.id.startsWith("prep-")) {
+            j.message = "Querying job state on RunPod...";
         }
     }
+    renderJobList();
+
+    try {
+        const resp = await api.fetchApi("/RunOnRunpod/recover-jobs", {
+            method: "POST",
+            body: JSON.stringify({
+                settings: getSettings(),
+                job_ids: jobIds,
+                prep_ids: prepIds,
+            }),
+        });
+        const data = await resp.json();
+        for (const entry of data.recovered || []) _applyRecoveredEntry(entry);
+        for (const entry of data.preps || []) _applyRecoveredPrep(entry);
+        renderJobList();
+        saveJobs();
+    } catch (err) {
+        console.error("[RunOnRunpod] recover-jobs error:", err);
+    }
+}
+
+async function loadJobs() {
+    const restored = _readStoredJobs();
+    if (!restored) return;
+
+    jobs = await _filterJobsByExistingFiles(restored);
+    renderJobList();
+    saveJobs();
+
+    await _recoverInFlightJobs();
 }
 
 function addJob(jobId) {
@@ -304,6 +311,14 @@ function getSettings() {
     };
 }
 
+// Escape untrusted text before interpolating into innerHTML templates.
+// Filenames and error strings travel through the worker and can contain
+// HTML-significant characters; without escaping they become an XSS sink.
+const _HTML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, c => _HTML_ESCAPE[c]);
+}
+
 // --- Media helpers ---
 const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
 const VIDEO_EXTS = [".mp4", ".webm"];
@@ -377,9 +392,10 @@ function renderJobCard(job) {
         }
     }
 
+    const jobIdEsc = escapeHtml(job.id);
     const cancelBtnHtml = isActive
-        ? `<button class="runpod-job-cancel" data-job-id="${job.id}" title="Cancel">X</button>`
-        : `<button class="runpod-job-remove" data-job-id="${job.id}" title="Remove from list (also deletes local output files)">X</button>`;
+        ? `<button class="runpod-job-cancel" data-job-id="${jobIdEsc}" title="Cancel">X</button>`
+        : `<button class="runpod-job-remove" data-job-id="${jobIdEsc}" title="Remove from list (also deletes local output files)">X</button>`;
 
     let fetchListHtml = "";
     if (job.fetchResults && job.fetchResults.length > 0) {
@@ -393,22 +409,22 @@ function renderJobCard(job) {
                 : r.status === "downloading" ? "#cccc44"
                 : "var(--p-text-muted-color, #888)";
             const nameStyle = r.status === "pending" ? "opacity:0.6;" : "";
-            const title = r.error ? ` title="${r.error.replace(/"/g, "&quot;")}"` : "";
-            return `<div class="runpod-fetch-item"${title}><span style="color:${color};font-weight:600;">${icon}</span> <span style="${nameStyle}">${r.filename}</span></div>`;
+            const title = r.error ? ` title="${escapeHtml(r.error)}"` : "";
+            return `<div class="runpod-fetch-item"${title}><span style="color:${color};font-weight:600;">${icon}</span> <span style="${nameStyle}">${escapeHtml(r.filename)}</span></div>`;
         }).join("");
         fetchListHtml = `<div class="runpod-fetch-list">${rows}</div>`;
     }
 
     card.innerHTML = `
         <div class="runpod-job-header">
-            <span class="runpod-job-time">${time}</span>
+            <span class="runpod-job-time">${escapeHtml(time)}</span>
             <div style="display:flex;align-items:center;gap:6px;">
                 ${stateBadge(job.state)}
                 ${cancelBtnHtml}
             </div>
         </div>
-        <div class="runpod-job-id" title="${job.id}">${job.id}</div>
-        <div class="runpod-job-message">${job.message || ""}</div>
+        <div class="runpod-job-id" title="${jobIdEsc}">${jobIdEsc}</div>
+        <div class="runpod-job-message">${escapeHtml(job.message || "")}</div>
         <div class="runpod-job-progress">${job.uploadPercent >= 0 ? `<div class="runpod-job-progress-bar" style="width:${job.uploadPercent}%"></div>` : ""}</div>
         ${fetchListHtml}
         ${previewHtml}
