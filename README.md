@@ -158,12 +158,15 @@ Everything lives on the RunPod network volume:
 
 When you submit a job, the plugin scans the workflow for model loader nodes (CheckpointLoader, LoraLoader, VAELoader, CLIPLoader, UNETLoader, ControlNetLoader, etc.) and checks if each model exists on the network volume. Missing models are automatically uploaded from your local ComfyUI models directory. This can be disabled in settings.
 
-**Download models from the source (optional, opt-in).** For very large models, uploading from a home connection is the slow part of the first run. With the **Download models from the source when possible** setting enabled, the plugin tries to find a remote source for each missing model and has the worker fetch it directly onto the network volume over the datacenter's much faster connection. Lookup order:
+**Workflow models metadata** — when a workflow template (most ComfyUI tutorial workflows do this) ships a top-level `models` array naming each model and its canonical download URL, the plugin uses that URL directly and asks the worker to fetch the file. This step runs **unconditionally** because the metadata is authoritative — it's shipped by the workflow author, not a third-party query — and it doesn't require the model to exist locally first. It's the fastest way to get a fresh tutorial workflow running on a new endpoint.
 
-1. **ComfyUI-Manager model database** — filename match against Manager's curated `model-list.json`. No external calls per model; the database itself is fetched once per 24h from GitHub.
-2. **HuggingFace cache reverse-lookup** — if a model resolves to a file inside your local `~/.cache/huggingface/hub/`, the plugin recovers the repo ID and asks the worker to re-download from HuggingFace. Local filesystem only, no network calls for the lookup.
-3. **CivitAI by hash** — the plugin hashes the local file and queries CivitAI's `by-hash` API. This is the only step that sends data externally: the SHA-256 of the file is sent to CivitAI to identify the model.
-4. **Fallback** — any model the lookup chain can't resolve is uploaded from your local file the normal way.
+**Download models from the source (optional, opt-in).** For very large models that the workflow doesn't declare a URL for, uploading from a home connection is the slow part of the first run. With the **Download models from the source when possible** setting enabled, the plugin tries to find a remote source for each remaining missing model and has the worker fetch it directly onto the network volume over the datacenter's much faster connection. Lookup order:
+
+1. **Workflow metadata** — described above. Always tried first, even when this setting is off.
+2. **ComfyUI-Manager model database** — filename match against Manager's curated `model-list.json`. No external calls per model; the database itself is fetched once per 24h from GitHub.
+3. **HuggingFace cache reverse-lookup** — if a model resolves to a file inside your local `~/.cache/huggingface/hub/`, the plugin recovers the repo ID and asks the worker to re-download from HuggingFace. Local filesystem only, no network calls for the lookup.
+4. **CivitAI by hash** — the plugin hashes the local file and queries CivitAI's `by-hash` API. This is the only step that sends data externally: the SHA-256 of the file is sent to CivitAI to identify the model.
+5. **Fallback** — any model the lookup chain can't resolve is uploaded from your local file the normal way.
 
 If the worker fails to download a file (404, network error, hash mismatch), it reports the failure back and the plugin falls back to uploading that specific file locally — the feature is purely a performance improvement, never a single point of failure. Gated HuggingFace repos or authenticated CivitAI downloads can be unlocked by configuring **HuggingFace Token** and **CivitAI API Key** in the Keys section.
 
