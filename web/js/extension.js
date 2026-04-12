@@ -499,7 +499,7 @@ async function cleanAll(btn) {
     const originalText = btn.textContent;
     btn.disabled = true;
     btn.classList.add("pulsing");
-    btn.textContent = `Cleaning everything...`;
+    btn.textContent = `Cleaning all...`;
 
     try {
         const res = await api.fetchApi("/RunOnRunpod/clean", {
@@ -550,8 +550,7 @@ const STYLES = `
         height: 2rem;
         border-radius: 0.375rem;
         text-decoration: none;
-        color: inherit;
-        opacity: 0.5;
+        color: var(--p-text-color, inherit);
         font-size: 14px;
         font-weight: 700;
         flex-shrink: 0;
@@ -560,8 +559,7 @@ const STYLES = `
         cursor: pointer;
     }
     .runpod-title-btn:hover {
-        opacity: 1;
-        background: rgba(255,255,255,0.08);
+        background: var(--p-content-hover-background, rgba(255,255,255,0.08));
     }
     .runpod-toolbar {
         flex-shrink: 0;
@@ -575,52 +573,60 @@ const STYLES = `
         display: flex;
         gap: 6px;
     }
+    /* Every button has a filled background so it's visible regardless of
+       theme. Colors use PrimeVue palette tokens which are defined on
+       :root in Aura and are consistent across light/dark (the theme only
+       picks a slightly different shade). Fallbacks match the token
+       values in case an older PrimeVue build doesn't expose them. */
     .runpod-btn {
         flex: 1;
         height: 40px;
         padding: 0 10px;
-        border: 1px solid #555;
+        border: 1px solid transparent;
         border-radius: 4px;
-        background: #2a2a2a;
-        color: #ccc;
+        color: var(--p-text-color, #fff);
         cursor: pointer;
         font-size: 12px;
         font-weight: 500;
         transition: background 0.15s;
     }
-    .runpod-btn:hover {
-        background: #3a3a3a;
-        color: #fff;
-    }
+    /* Run — green */
     .runpod-btn.run {
-        background: #2a6e2a;
-        border-color: #3a8e3a;
-        color: #cfc;
+        background: color-mix(in srgb, var(--p-green-600, #16a34a) 65%, transparent);
+        border-color: color-mix(in srgb, var(--p-green-600, #16a34a) 85%, transparent);
     }
     .runpod-btn.run:hover {
-        background: #3a8e3a;
+        background: color-mix(in srgb, var(--p-green-500, #22c55e) 85%, transparent);
+        border-color: var(--p-green-500, #22c55e);
     }
+    /* Clean Inputs / Outputs / Jobs / Check Latency — amber */
     .runpod-btn.clean {
-        font-size: 11px;
-        color: #aaa;
+        background: color-mix(in srgb, var(--p-amber-600, #d97706) 65%, transparent);
+        border-color: color-mix(in srgb, var(--p-amber-600, #d97706) 85%, transparent);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
+    .runpod-btn.clean:hover {
+        background: color-mix(in srgb, var(--p-amber-500, #f59e0b) 85%, transparent);
+        border-color: var(--p-amber-500, #f59e0b);
+    }
+    /* Clean All — red (ordered after .clean so it wins on Clean All,
+       which carries both classes). */
     .runpod-btn.danger {
-        color: #cc8844;
-        border-color: #663311;
+        background: color-mix(in srgb, var(--p-red-600, #dc2626) 65%, transparent);
+        border-color: color-mix(in srgb, var(--p-red-600, #dc2626) 85%, transparent);
     }
     .runpod-btn.danger:hover {
-        background: #3a1a0a;
-        color: #ffaa66;
+        background: color-mix(in srgb, var(--p-red-500, #ef4444) 85%, transparent);
+        border-color: var(--p-red-500, #ef4444);
     }
     .runpod-btn.pulsing {
         animation: runpod-pulse 1s ease-in-out infinite;
     }
     @keyframes runpod-pulse {
-        0%, 100% { background: #2a2a2a; }
-        50% { background: #3a3a3a; }
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
     }
     .runpod-jobs {
         flex: 1;
@@ -1094,7 +1100,7 @@ app.registerExtension({
 
                 const cleanAllBtn = document.createElement("button");
                 cleanAllBtn.className = "runpod-btn clean danger";
-                cleanAllBtn.textContent = "Clean Everything";
+                cleanAllBtn.textContent = "Clean All";
                 cleanAllBtn.title = "Delete ALL files on the network volume: inputs, outputs, AND models";
                 cleanAllBtn.addEventListener("click", () => cleanAll(cleanAllBtn));
 
