@@ -924,6 +924,87 @@ async def get_info(_request):
     })
 
 
+@routes.post("/RunOnRunpod/recover-jobs")
+async def recover_jobs(request):
+    """Re-attach to in-flight jobs after a page reload or ComfyUI restart.
+
+    For each persisted job_id the frontend hands us, query RunPod for
+    its current status. If the job is still IN_QUEUE/IN_PROGRESS and
+    we don't already have a polling task for it, start a fresh one.
+    Recovered jobs run with empty input_files since the original
+    upload context is gone — that means input cleanup won't happen
+    automatically for them, but the workflow output still gets
+    downloaded normally.
+    """
+    data = await request.json()
+    settings = data.get("settings", {})
+    job_ids = data.get("job_ids", []) or []
+    api_key = settings.get("apiKey", "")
+    endpoint_id = settings.get("endpointId", "")
+
+    if not api_key or not endpoint_id:
+        return web.json_response({"error": "Missing API key or endpoint ID"}, status=400)
+
+    recovered: list[dict] = []
+
+    async with aiohttp.ClientSession() as session:
+        for job_id in job_ids:
+            if not isinstance(job_id, str) or not job_id:
+                continue
+
+            # If we already have a polling task for this job, the
+            # frontend will receive its events normally — just report
+            # the current state without re-attaching.
+            existing_task = _active_tasks.get(job_id)
+            already_polling = existing_task is not None and not existing_task.done()
+
+            try:
+                async with session.get(
+                    f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                ) as resp:
+                    if resp.status == 404:
+                        recovered.append({"job_id": job_id, "state": "lost"})
+                        continue
+                    result = await resp.json()
+            except Exception as e:
+                print(_PREFIX, f"recover-jobs: status check failed for {job_id}: {e}")
+                recovered.append({"job_id": job_id, "state": "lost"})
+                continue
+
+            status = result.get("status", "UNKNOWN")
+            entry: dict = {"job_id": job_id}
+
+            if status == "COMPLETED":
+                entry["state"] = "completed"
+                output = result.get("output", {}) or {}
+                output_files = output.get("output_files", []) if isinstance(output, dict) else []
+                # Download outputs to local; pass empty input_files
+                # because the original upload context is gone.
+                downloaded = await _download_and_cleanup(settings, output_files, {})
+                entry["files"] = downloaded
+            elif status in ("IN_QUEUE", "IN_PROGRESS"):
+                entry["state"] = "running" if status == "IN_PROGRESS" else "queued"
+                if not already_polling:
+                    task = asyncio.create_task(_poll_and_finish(job_id, settings, {}))
+                    _active_tasks[job_id] = task
+                    print(_PREFIX, f"recover-jobs: re-attached polling for {job_id}")
+            elif status == "FAILED":
+                entry["state"] = "failed"
+                error = result.get("error") or (result.get("output", {}) or {}).get("error") or "Job failed"
+                entry["error"] = str(error)
+            elif status == "CANCELLED":
+                entry["state"] = "cancelled"
+            elif status == "TIMED_OUT":
+                entry["state"] = "timed_out"
+            else:
+                entry["state"] = "lost"
+
+            recovered.append(entry)
+
+    return web.json_response({"recovered": recovered})
+
+
 @routes.post("/RunOnRunpod/check-local-outputs")
 async def check_local_outputs(request):
     """Return which of the given relative output paths still exist on disk.

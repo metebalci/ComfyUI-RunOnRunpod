@@ -42,10 +42,11 @@ function renderWorkerInfo(info) {
     workerInfoEl.title = parts.join("\n");
 }
 
-// localStorage persistence — only finished jobs are persisted, capped to
-// avoid unbounded growth. In-flight jobs are intentionally dropped on
-// reload because their backend polling task may also be gone (TODO:
-// in-flight recovery via RunPod API would re-attach them).
+// localStorage persistence — all jobs are persisted, including in-flight
+// ones. On reload, finished jobs are restored as-is (after a file
+// existence check); in-flight jobs are revalidated via the
+// recover-jobs backend endpoint, which queries RunPod for their
+// current status and re-attaches polling if needed.
 const STORAGE_KEY = "runonrunpod.jobs";
 const FINISHED_STATES = [
     JOB_STATE.COMPLETED,
@@ -53,6 +54,11 @@ const FINISHED_STATES = [
     JOB_STATE.CANCELLED,
     JOB_STATE.TIMED_OUT,
     JOB_STATE.ERROR,
+];
+const ACTIVE_STATES = [
+    JOB_STATE.PREPARING,
+    JOB_STATE.QUEUED,
+    JOB_STATE.RUNNING,
 ];
 
 function getHistoryCap() {
@@ -63,19 +69,26 @@ function getHistoryCap() {
 function saveJobs() {
     try {
         const cap = getHistoryCap();
-        if (cap === 0) {
-            localStorage.removeItem(STORAGE_KEY);
-            return;
-        }
-        const finished = jobs.filter(j => FINISHED_STATES.includes(j.state)).slice(0, cap);
-        const serialized = finished.map(j => ({
+        // In-flight jobs are always persisted (no cap) so reload can
+        // recover them. Finished jobs are capped by the history setting;
+        // a cap of 0 means "no history persistence" but in-flight jobs
+        // still survive a reload.
+        const inFlight = jobs.filter(j => ACTIVE_STATES.includes(j.state));
+        const finished = cap > 0
+            ? jobs.filter(j => FINISHED_STATES.includes(j.state)).slice(0, cap)
+            : [];
+        const serialized = [...inFlight, ...finished].map(j => ({
             id: j.id,
             state: j.state,
             message: j.message,
             files: j.files || [],
             createdAt: j.createdAt.toISOString(),
         }));
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(serialized));
+        if (serialized.length === 0) {
+            localStorage.removeItem(STORAGE_KEY);
+        } else {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(serialized));
+        }
     } catch (err) {
         console.error("[RunOnRunpod] saveJobs error:", err);
     }
@@ -134,6 +147,56 @@ async function loadJobs() {
     jobs = filtered;
     renderJobList();
     saveJobs();
+
+    // For each in-flight job, ask the backend to query RunPod for
+    // its current status and re-attach polling if needed.
+    const inFlightJobs = jobs.filter(j => ACTIVE_STATES.includes(j.state));
+    const inFlightIds = inFlightJobs.map(j => j.id);
+    if (inFlightIds.length > 0) {
+        // Show a placeholder message on each card so the user sees
+        // something is happening while we wait for RunPod's status.
+        for (const j of inFlightJobs) {
+            j.message = "Querying job state on RunPod...";
+        }
+        renderJobList();
+
+        try {
+            const resp = await api.fetchApi("/RunOnRunpod/recover-jobs", {
+                method: "POST",
+                body: JSON.stringify({ settings: getSettings(), job_ids: inFlightIds }),
+            });
+            const data = await resp.json();
+            for (const entry of data.recovered || []) {
+                const job = findJob(entry.job_id);
+                if (!job) continue;
+                if (entry.state === "lost") {
+                    const idx = jobs.findIndex(j => j.id === entry.job_id);
+                    if (idx >= 0) jobs.splice(idx, 1);
+                    continue;
+                }
+                const updates = { state: entry.state };
+                if (entry.state === "completed") {
+                    updates.files = entry.files || [];
+                    updates.message = `Completed - ${(entry.files || []).length} output file(s)`;
+                } else if (entry.state === "failed") {
+                    updates.message = `Failed: ${entry.error || "unknown error"}`;
+                } else if (entry.state === "cancelled") {
+                    updates.message = "Cancelled";
+                } else if (entry.state === "timed_out") {
+                    updates.message = "Timed out";
+                } else if (entry.state === "queued") {
+                    updates.message = "Queued on RunPod (recovered)";
+                } else if (entry.state === "running") {
+                    updates.message = "Running (recovered)";
+                }
+                Object.assign(job, updates);
+            }
+            renderJobList();
+            saveJobs();
+        } catch (err) {
+            console.error("[RunOnRunpod] recover-jobs error:", err);
+        }
+    }
 }
 
 function addJob(jobId) {
@@ -1341,8 +1404,8 @@ app.registerExtension({
                     .then(r => r.json())
                     .then(info => {
                         if (info && info.plugin_version) {
-                            versionLabel.textContent = `v${info.plugin_version} · p${info.protocol_version}`;
-                            versionLabel.title = `Plugin v${info.plugin_version}, protocol version ${info.protocol_version}`;
+                            versionLabel.textContent = `${info.plugin_version} · p${info.protocol_version}`;
+                            versionLabel.title = `Plugin ${info.plugin_version}, protocol version ${info.protocol_version}`;
                         }
                         if (info && info.worker_info) {
                             renderWorkerInfo(info.worker_info);
