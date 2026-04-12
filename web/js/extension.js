@@ -299,7 +299,7 @@ function showRemoveJobDialog(fileCount) {
         modal.className = "runpod-modal";
         modal.innerHTML = `
             <h3>Remove job</h3>
-            <p style="margin:8px 0 16px 0;">This job produced ${fileCount} output file(s).</p>
+            <p style="margin:8px 0 16px 0;">This job produced ${fileCount} output file${fileCount === 1 ? "" : "s"}.</p>
             <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
                 <button class="runpod-modal-close" data-action="cancel">Cancel</button>
                 <button class="runpod-modal-close" data-action="job-only">Delete Job Only</button>
@@ -332,16 +332,23 @@ async function removeJob(jobId) {
     const job = findJob(jobId);
     if (!job) return;
 
+    const behavior = app.extensionManager.setting.get("Run on Runpod.Job.removeBehavior") || "delete";
+    const hasFiles = job.files && job.files.length > 0;
+
     let deleteFiles = false;
-    if (job.files && job.files.length > 1) {
+    if (!hasFiles) {
+        deleteFiles = false;
+    } else if (behavior === "delete") {
+        deleteFiles = true;
+    } else if (behavior === "keep") {
+        deleteFiles = false;
+    } else { // "ask"
         const action = await showRemoveJobDialog(job.files.length);
         if (action === "cancel") return;
         deleteFiles = action === "delete-files";
-    } else if (job.files && job.files.length === 1) {
-        deleteFiles = true;
     }
 
-    if (deleteFiles && job.files && job.files.length > 0) {
+    if (deleteFiles && hasFiles) {
         try {
             await api.fetchApi("/RunOnRunpod/delete-local-outputs", {
                 method: "POST",
@@ -1040,6 +1047,18 @@ app.registerExtension({
             defaultValue: 20,
             tooltip: "How many finished job cards to remember across page reloads and ComfyUI restarts. Set to 0 to disable persistence entirely.",
             attrs: { min: 0, max: 200, step: 1 },
+        },
+        {
+            id: "Run on Runpod.Job.removeBehavior",
+            name: "When removing a job",
+            type: "combo",
+            defaultValue: "delete",
+            options: [
+                { text: "Delete output files", value: "delete" },
+                { text: "Keep output files", value: "keep" },
+                { text: "Ask each time", value: "ask" },
+            ],
+            tooltip: "What happens when you click the X on a finished job card. 'Delete' removes the local output files (and any folder that becomes empty). 'Keep' only removes the card. 'Ask' shows a confirmation every time, even for single-file jobs.",
         },
         {
             id: "Run on Runpod.Keys.hfToken",
