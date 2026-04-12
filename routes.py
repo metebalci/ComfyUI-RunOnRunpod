@@ -17,8 +17,10 @@ routes = PromptServer.instance.routes
 # In-memory state for active jobs: {job_id: asyncio.Task}
 _active_tasks = {}
 
-# Flag to cancel the current submit (preparation/upload phase)
-_prepare_cancelled = False
+# Set of prep_ids whose submit/prep phase has been cancelled. submit_job
+# checks membership at each cancellation-aware point; entries are discarded
+# once submit_job returns (successful or not).
+_cancelled_preps: set[str] = set()
 
 
 def _send_event(event: str, data: dict = {}):
@@ -296,18 +298,27 @@ async def _runpod_streaming_action(
 
 @routes.post("/RunOnRunpod/cancel-prepare")
 async def cancel_prepare(request):
-    """Cancel the current submit/upload preparation phase."""
-    global _prepare_cancelled
-    _prepare_cancelled = True
+    """Cancel a specific in-flight submit/prep phase by prep_id."""
+    data = await request.json()
+    prep_id = data.get("prep_id", "")
+    if prep_id:
+        _cancelled_preps.add(prep_id)
     return web.json_response({"status": "cancelling"})
 
 
 @routes.post("/RunOnRunpod/submit")
 async def submit_job(request):
-    global _prepare_cancelled
-    _prepare_cancelled = False
-
     data = await request.json()
+    prep_id = data.get("prep_id", "")
+    try:
+        return await _do_submit(data)
+    finally:
+        # Always discard so a cancelled prep doesn't leak its flag into
+        # a future submit that happens to pick the same prep_id.
+        _cancelled_preps.discard(prep_id)
+
+
+async def _do_submit(data: dict):
     settings = data.get("settings", {})
     workflow = data.get("workflow", {})
     prep_id = data.get("prep_id", "")
@@ -370,7 +381,7 @@ async def submit_job(request):
         print(_PREFIX, f"Worker ping failed: {e}")
         return web.json_response({"error": f"Worker not available: {e}"}, status=500)
 
-    if _prepare_cancelled:
+    if prep_id in _cancelled_preps:
         print(_PREFIX, "Submit cancelled during worker ping")
         return web.json_response({"error": "Cancelled"}, status=499)
 
@@ -389,7 +400,7 @@ async def submit_job(request):
         print(_PREFIX, f"Node list check failed: {e}")
         return web.json_response({"error": f"Node check failed: {e}"}, status=500)
 
-    if _prepare_cancelled:
+    if prep_id in _cancelled_preps:
         print(_PREFIX, "Submit cancelled during node check")
         return web.json_response({"error": "Cancelled"}, status=499)
 
@@ -401,7 +412,7 @@ async def submit_job(request):
         input_dir = _get_input_directory()
 
         for filename in input_file_refs:
-            if _prepare_cancelled:
+            if prep_id in _cancelled_preps:
                 print(_PREFIX, "Submit cancelled during input upload")
                 return web.json_response({"error": "Cancelled"}, status=499)
             file_path = os.path.join(input_dir, filename)
@@ -424,7 +435,7 @@ async def submit_job(request):
             # path as before.
             missing: list[tuple[str, str, str | None]] = []  # (subdir, filename, local_path)
             for (subdir, filename) in model_refs:
-                if _prepare_cancelled:
+                if prep_id in _cancelled_preps:
                     print(_PREFIX, "Submit cancelled during model scan")
                     return web.json_response({"error": "Cancelled"}, status=499)
                 s3_key = f"models/{subdir}/{filename}"
@@ -449,7 +460,7 @@ async def submit_job(request):
                     "message": f"Looking up sources for {len(missing)} model(s)...",
                 })
                 for subdir, filename, local_path in missing:
-                    if _prepare_cancelled:
+                    if prep_id in _cancelled_preps:
                         print(_PREFIX, "Submit cancelled during source lookup")
                         return web.json_response({"error": "Cancelled"}, status=499)
                     descriptor = await asyncio.to_thread(
@@ -526,7 +537,7 @@ async def submit_job(request):
 
             # Local upload path (for misses + worker failures).
             for subdir, filename, local_path in upload_queue:
-                if _prepare_cancelled:
+                if prep_id in _cancelled_preps:
                     print(_PREFIX, "Submit cancelled during model upload")
                     return web.json_response({"error": "Cancelled"}, status=499)
                 s3_key = f"models/{subdir}/{filename}"
@@ -710,6 +721,74 @@ async def cancel_job(request):
 
     return web.json_response({
         "status": result.get("status", "CANCELLED"),
+    })
+
+
+@routes.post("/RunOnRunpod/purge-queue")
+async def purge_queue(request):
+    """Cancel every active job and empty the endpoint queue atomically.
+
+    - Marks every tracked prep_id as cancelled so any in-progress submit
+      stops after its current upload.
+    - Calls RunPod's endpoint-wide /purge-queue to clear all queued jobs
+      (note: this affects ALL jobs on the endpoint, not just ours).
+    - Calls /cancel/{job_id} for every running job we track, since
+      purge-queue doesn't interrupt jobs already running on a worker.
+    - Cancels all background polling tasks.
+    """
+    data = await request.json()
+    settings = data.get("settings", {})
+    api_key = settings.get("apiKey", "")
+    endpoint_id = settings.get("endpointId", "")
+
+    if not api_key or not endpoint_id:
+        return web.json_response({"error": "API key and endpoint ID required"}, status=400)
+
+    # Mark every known prep as cancelled. Callers send in-progress prep_ids
+    # in the body so we can also cancel preps we haven't seen yet via the
+    # submit route (rare race condition).
+    prep_ids = data.get("prep_ids", []) or []
+    for pid in prep_ids:
+        if pid:
+            _cancelled_preps.add(pid)
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    tracked_job_ids = list(_active_tasks.keys())
+
+    async with aiohttp.ClientSession() as session:
+        # Cancel tracked running/queued jobs individually. purge-queue only
+        # touches IN_QUEUE jobs, so this is the only way to stop anything
+        # already running on a worker.
+        for jid in tracked_job_ids:
+            try:
+                async with session.post(
+                    f"https://api.runpod.ai/v2/{endpoint_id}/cancel/{jid}",
+                    headers=headers,
+                ) as resp:
+                    await resp.read()
+            except Exception as e:
+                print(_PREFIX, f"purge-queue: cancel {jid} failed: {e}")
+
+        # Endpoint-wide queue purge.
+        try:
+            async with session.post(
+                f"https://api.runpod.ai/v2/{endpoint_id}/purge-queue",
+                headers=headers,
+            ) as resp:
+                purge_result = await resp.json()
+        except Exception as e:
+            print(_PREFIX, f"purge-queue: purge failed: {e}")
+            purge_result = {"error": str(e)}
+
+    # Cancel in-process polling tasks so they stop consuming API calls.
+    for jid, task in list(_active_tasks.items()):
+        if not task.done():
+            task.cancel()
+
+    return web.json_response({
+        "cancelled_jobs": len(tracked_job_ids),
+        "cancelled_preps": len(prep_ids),
+        "purge_result": purge_result,
     })
 
 

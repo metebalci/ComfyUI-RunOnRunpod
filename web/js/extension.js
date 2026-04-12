@@ -279,7 +279,10 @@ async function cancelJob(jobId) {
         // Cancel the upload/preparation phase — backend will stop after current upload finishes
         updateJob(jobId, { message: "Cancelling after current upload..." });
         try {
-            await api.fetchApi("/RunOnRunpod/cancel-prepare", { method: "POST" });
+            await api.fetchApi("/RunOnRunpod/cancel-prepare", {
+                method: "POST",
+                body: JSON.stringify({ prep_id: jobId }),
+            });
         } catch (err) {
             console.error("[RunOnRunpod] Cancel-prepare error:", err);
         }
@@ -765,10 +768,35 @@ app.registerExtension({
                 const cleanJobsBtn = document.createElement("button");
                 cleanJobsBtn.className = "runpod-btn clean";
                 cleanJobsBtn.textContent = "Clean Jobs";
-                cleanJobsBtn.title = "Remove finished jobs from the list";
-                cleanJobsBtn.addEventListener("click", () => {
+                cleanJobsBtn.title = "Cancel active jobs and clear the list";
+                cleanJobsBtn.addEventListener("click", async () => {
                     const active = [JOB_STATE.PREPARING, JOB_STATE.QUEUED, JOB_STATE.RUNNING];
-                    jobs = jobs.filter(j => active.includes(j.state));
+                    const activeJobs = jobs.filter(j => active.includes(j.state));
+
+                    if (activeJobs.length > 0) {
+                        const ok = confirm(
+                            `Cancel ${activeJobs.length} active job(s) and clear the list?\n\n` +
+                            `This purges the endpoint queue on RunPod and cancels running jobs. ` +
+                            `Any jobs submitted to this endpoint from elsewhere will also be affected.`
+                        );
+                        if (!ok) return;
+
+                        // Send every tracked prep_id so in-flight preps also stop.
+                        const prepIds = activeJobs
+                            .filter(j => j.state === JOB_STATE.PREPARING)
+                            .map(j => j.id);
+
+                        try {
+                            await api.fetchApi("/RunOnRunpod/purge-queue", {
+                                method: "POST",
+                                body: JSON.stringify({ settings: getSettings(), prep_ids: prepIds }),
+                            });
+                        } catch (err) {
+                            console.error("[RunOnRunpod] purge-queue error:", err);
+                        }
+                    }
+
+                    jobs = [];
                     renderJobList();
                 });
 
