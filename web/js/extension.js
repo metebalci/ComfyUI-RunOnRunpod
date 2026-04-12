@@ -148,24 +148,33 @@ async function loadJobs() {
     renderJobList();
     saveJobs();
 
-    // For each in-flight job, ask the backend to query RunPod for
-    // its current status and re-attach polling if needed.
-    const inFlightJobs = jobs.filter(j => ACTIVE_STATES.includes(j.state));
-    const inFlightIds = inFlightJobs.map(j => j.id);
-    if (inFlightIds.length > 0) {
-        // Show a placeholder message on each card so the user sees
-        // something is happening while we wait for RunPod's status.
-        for (const j of inFlightJobs) {
-            j.message = "Querying job state on RunPod...";
+    // Recover in-flight jobs after a reload. Real RunPod job IDs are
+    // queried via /status; prep-* IDs are checked against the
+    // backend's in-memory _active_preps set so we can drop preps that
+    // died (e.g., the ComfyUI process restarted) while keeping the
+    // ones the backend is still working on.
+    const inFlight = jobs.filter(j => ACTIVE_STATES.includes(j.state));
+    const jobIds = inFlight.filter(j => !j.id.startsWith("prep-")).map(j => j.id);
+    const prepIds = inFlight.filter(j => j.id.startsWith("prep-")).map(j => j.id);
+    if (jobIds.length > 0 || prepIds.length > 0) {
+        for (const j of inFlight) {
+            if (!j.id.startsWith("prep-")) {
+                j.message = "Querying job state on RunPod...";
+            }
         }
         renderJobList();
 
         try {
             const resp = await api.fetchApi("/RunOnRunpod/recover-jobs", {
                 method: "POST",
-                body: JSON.stringify({ settings: getSettings(), job_ids: inFlightIds }),
+                body: JSON.stringify({
+                    settings: getSettings(),
+                    job_ids: jobIds,
+                    prep_ids: prepIds,
+                }),
             });
             const data = await resp.json();
+
             for (const entry of data.recovered || []) {
                 const job = findJob(entry.job_id);
                 if (!job) continue;
@@ -191,6 +200,17 @@ async function loadJobs() {
                 }
                 Object.assign(job, updates);
             }
+
+            for (const entry of data.preps || []) {
+                if (entry.state === "lost") {
+                    const idx = jobs.findIndex(j => j.id === entry.prep_id);
+                    if (idx >= 0) jobs.splice(idx, 1);
+                }
+                // state === "preparing" → backend is still working on
+                // it; leave the card alone, the next websocket event
+                // will overwrite the message.
+            }
+
             renderJobList();
             saveJobs();
         } catch (err) {

@@ -51,6 +51,13 @@ _last_worker_info: dict = {}
 # once submit_job returns (successful or not).
 _cancelled_preps: set[str] = set()
 
+# Set of prep_ids currently being processed by a submit/prep call. Used by
+# the recover-jobs endpoint after a page reload — if a persisted prep_id
+# is in this set, the backend is still working on it and the frontend
+# should keep the card. Otherwise the prep is dead (e.g., the ComfyUI
+# process restarted) and the card can be dropped.
+_active_preps: set[str] = set()
+
 
 def _send_event(event: str, data: dict = {}):
     """Push an event to the frontend via WebSocket."""
@@ -343,11 +350,14 @@ async def cancel_prepare(request):
 async def submit_job(request):
     data = await request.json()
     prep_id = data.get("prep_id", "")
+    if prep_id:
+        _active_preps.add(prep_id)
     try:
         return await _do_submit(data)
     finally:
         # Always discard so a cancelled prep doesn't leak its flag into
         # a future submit that happens to pick the same prep_id.
+        _active_preps.discard(prep_id)
         _cancelled_preps.discard(prep_id)
 
 
@@ -966,11 +976,28 @@ async def recover_jobs(request):
     data = await request.json()
     settings = data.get("settings", {})
     job_ids = data.get("job_ids", []) or []
+    prep_ids = data.get("prep_ids", []) or []
     api_key = settings.get("apiKey", "")
     endpoint_id = settings.get("endpointId", "")
 
+    # Resolve prep_ids against the in-memory set of preps the backend
+    # is currently working on. If the prep is still active, the
+    # frontend keeps the card and the still-running prep task will
+    # push websocket events to the new page session normally. If the
+    # prep is gone (e.g., ComfyUI restarted), it can never complete,
+    # so the card is dropped.
+    preps: list[dict] = []
+    for prep_id in prep_ids:
+        if not isinstance(prep_id, str) or not prep_id:
+            continue
+        if prep_id in _active_preps:
+            preps.append({"prep_id": prep_id, "state": "preparing"})
+        else:
+            preps.append({"prep_id": prep_id, "state": "lost"})
+
     if not api_key or not endpoint_id:
-        return web.json_response({"error": "Missing API key or endpoint ID"}, status=400)
+        # Without RunPod credentials we can still report prep state.
+        return web.json_response({"recovered": [], "preps": preps})
 
     recovered: list[dict] = []
 
@@ -1029,7 +1056,7 @@ async def recover_jobs(request):
 
             recovered.append(entry)
 
-    return web.json_response({"recovered": recovered})
+    return web.json_response({"recovered": recovered, "preps": preps})
 
 
 @routes.post("/RunOnRunpod/check-local-outputs")
