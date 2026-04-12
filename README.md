@@ -12,7 +12,9 @@ Installed in your local ComfyUI's `custom_nodes/` directory. Provides:
 
 - **Sidebar panel** (cloud icon) with Run button and job history
 - **Multi-job support** — submit multiple workflows and track each independently
+- **Persistent job history** — finished jobs survive page reloads and ComfyUI restarts; configurable cap and a per-job remove button (with optional output-file deletion)
 - **Real-time status** via WebSocket — preparing, queued, running, completed, failed
+- **Per-model progress list** — every model needed for the job is shown up front on the card and ticked off as the worker fetches or the plugin uploads it
 - **Upload progress bar** for model uploads with MB/percentage display
 - **Cancel support** — cancel during upload (waits for current file to finish) or while queued/running on RunPod
 - **Settings panel** for RunPod and storage configuration
@@ -70,12 +72,8 @@ A pre-built image is available at `docker.io/metebalci/comfyui-runonrunpod:lates
 To build your own image with different custom nodes:
 
 1. Edit `worker/custom_nodes.txt` to list the custom nodes you need (one git URL per line)
-2. Build and push:
-   ```bash
-   cd worker
-   docker build -t your-dockerhub-username/comfyui-runonrunpod:latest .
-   docker push your-dockerhub-username/comfyui-runonrunpod:latest
-   ```
+2. Commit the change (the build script refuses to run with uncommitted worker changes so every published tag maps back to a real commit)
+3. Run `./build-docker.sh` from the repo root. The script tags the image as `cu130_torch211_comfyui<version>_<sha>` (where `<sha>` is the short SHA of the last commit that touched `worker/`) and also updates `:latest`. Edit `IMAGE` at the top of the script to point at your own Docker Hub user before pushing.
 
 For quick testing, you can install extra custom nodes at startup without rebuilding the image by setting the `EXTRA_CUSTOM_NODES_URL` environment variable to a URL pointing to a text file with git URLs (same format as `custom_nodes.txt`). Nodes already baked into the image are skipped. This adds to cold start time, so for production use, rebuild the image instead.
 
@@ -109,9 +107,9 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
 
 **Job:**
 - Upload missing models automatically — default on
-- Download from the source when possible — default off (see Storage Architecture)
-- Delete inputs from network volume after job — default off
-- Delete outputs from network volume after job — default on (outputs are downloaded locally first)
+- Download models from the source when possible — default off (see Storage Architecture)
+- Number of jobs kept in history — default 20 (set to 0 to disable persistence)
+- When removing a job — default *Delete output files*; alternatives are *Keep output files* and *Ask each time*
 
 **Keys:**
 - API Key — RunPod API key
@@ -127,6 +125,8 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
 - Bucket Name — your network volume ID
 - Region — S3 region (shown on RunPod dashboard, e.g. `eur-is-1`)
 - Endpoint URL — RunPod S3 endpoint (region-specific, shown on RunPod dashboard)
+- Delete input files from network volume after job finishes — default off
+- Delete output files from network volume after job finishes — default on (outputs are downloaded locally first)
 
 ## Usage
 
@@ -142,9 +142,9 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
    - **cancelled** — job was cancelled from the UI, dashboard, or API
    - **timed out** — the endpoint's execution timeout was exceeded (no worker available in time, or the worker stopped reporting)
    - **error** — something failed before the job reached the worker (bad credentials, S3 error, upload failure, network issue) — fix it locally and retry
-5. Click **X** on a job card to cancel it
+5. Click **X** on an active job card to cancel it; click **X** on a finished job card to remove it from the list (and optionally delete its local output files — see the *When removing a job* setting)
 6. Use **Clean Inputs** / **Clean Outputs** to remove files from the network volume
-7. Use **Clean Jobs** to clear finished jobs from the list
+7. Use **Clean Jobs** to clear all jobs from the list
 
 ## Storage Architecture
 
@@ -156,7 +156,7 @@ Everything lives on the RunPod network volume:
 
 When you submit a job, the plugin scans the workflow for model loader nodes (CheckpointLoader, LoraLoader, VAELoader, CLIPLoader, UNETLoader, ControlNetLoader, etc.) and checks if each model exists on the network volume. Missing models are automatically uploaded from your local ComfyUI models directory. This can be disabled in settings.
 
-**Download from the source (optional, opt-in).** For very large models, uploading from a home connection is the slow part of the first run. With the **Download from the source when possible** setting enabled, the plugin tries to find a remote source for each missing model and has the worker fetch it directly onto the network volume over the datacenter's much faster connection. Lookup order:
+**Download models from the source (optional, opt-in).** For very large models, uploading from a home connection is the slow part of the first run. With the **Download models from the source when possible** setting enabled, the plugin tries to find a remote source for each missing model and has the worker fetch it directly onto the network volume over the datacenter's much faster connection. Lookup order:
 
 1. **ComfyUI-Manager model database** — filename match against Manager's curated `model-list.json`. No external calls per model; the database itself is fetched once per 24h from GitHub.
 2. **HuggingFace cache reverse-lookup** — if a model resolves to a file inside your local `~/.cache/huggingface/hub/`, the plugin recovers the repo ID and asks the worker to re-download from HuggingFace. Local filesystem only, no network calls for the lookup.
@@ -169,8 +169,8 @@ Input files are deduplicated using content hashing (SHA-256). Each file is store
 
 After a job ends (whether it succeeds or fails), the plugin downloads output files to your local ComfyUI output directory. Two cleanup settings control whether remote files are removed from the network volume afterward:
 
-- **Delete inputs after job** (default: off) — keeps deduplicated inputs for reuse across jobs
-- **Delete outputs after job** (default: on) — removes remote outputs since they've been downloaded locally
+- **Delete input files from network volume after job finishes** (default: off) — keeps deduplicated inputs for reuse across jobs
+- **Delete output files from network volume after job finishes** (default: on) — removes remote outputs since they've been downloaded locally
 
 The worker has zero storage configuration — the network volume is mounted locally and it just reads/writes files.
 

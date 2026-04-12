@@ -15,25 +15,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # need full history for `git log -1 -- worker/`
 
-      - name: Get latest ComfyUI tag
-        id: comfyui
+      - name: Get latest ComfyUI tag and worker SHA
+        id: meta
         run: |
           TAG=$(git ls-remote --tags --sort=-v:refname https://github.com/comfyanonymous/ComfyUI.git 'v*' \
             | head -1 \
             | sed 's/.*refs\/tags\///' \
             | sed 's/\^{}//')
           VERSION=$(echo "${TAG#v}" | tr -d '.')
-          IMAGE_TAG="cu130_torch211_comfyui${VERSION}"
+          WORKER_SHA=$(git log -1 --format=%h -- worker/)
+          IMAGE_TAG="cu130_torch211_comfyui${VERSION}_${WORKER_SHA}"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "worker_sha=$WORKER_SHA" >> $GITHUB_OUTPUT
           echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "ComfyUI tag: $TAG -> image tag: $IMAGE_TAG"
+          echo "ComfyUI tag: $TAG, worker SHA: $WORKER_SHA -> image tag: $IMAGE_TAG"
 
       - name: Check if image already exists
         id: check
         if: github.event_name == 'schedule'
         run: |
-          if docker manifest inspect docker.io/metebalci/comfyui-runonrunpod:${{ steps.comfyui.outputs.image_tag }} > /dev/null 2>&1; then
+          if docker manifest inspect docker.io/metebalci/comfyui-runonrunpod:${{ steps.meta.outputs.image_tag }} > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "Image already exists, skipping build"
           else
@@ -59,9 +63,9 @@ jobs:
           context: ./worker
           push: true
           build-args: |
-            COMFYUI_TAG=${{ steps.comfyui.outputs.tag }}
+            COMFYUI_TAG=${{ steps.meta.outputs.tag }}
           tags: |
-            metebalci/comfyui-runonrunpod:${{ steps.comfyui.outputs.image_tag }}
+            metebalci/comfyui-runonrunpod:${{ steps.meta.outputs.image_tag }}
             metebalci/comfyui-runonrunpod:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
