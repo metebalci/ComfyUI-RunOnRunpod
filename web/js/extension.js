@@ -22,6 +22,100 @@ const JOB_STATE = {
 let jobs = [];
 let jobListEl = null;
 
+// localStorage persistence — only finished jobs are persisted, capped to
+// avoid unbounded growth. In-flight jobs are intentionally dropped on
+// reload because their backend polling task may also be gone (TODO:
+// in-flight recovery via RunPod API would re-attach them).
+const STORAGE_KEY = "runonrunpod.jobs";
+const FINISHED_STATES = [
+    JOB_STATE.COMPLETED,
+    JOB_STATE.FAILED,
+    JOB_STATE.CANCELLED,
+    JOB_STATE.TIMED_OUT,
+    JOB_STATE.ERROR,
+];
+
+function getHistoryCap() {
+    const v = app.extensionManager.setting.get("Run on Runpod.Job.historySize");
+    return Number.isFinite(v) && v >= 0 ? v : 20;
+}
+
+function saveJobs() {
+    try {
+        const cap = getHistoryCap();
+        if (cap === 0) {
+            localStorage.removeItem(STORAGE_KEY);
+            return;
+        }
+        const finished = jobs.filter(j => FINISHED_STATES.includes(j.state)).slice(0, cap);
+        const serialized = finished.map(j => ({
+            id: j.id,
+            state: j.state,
+            message: j.message,
+            files: j.files || [],
+            createdAt: j.createdAt.toISOString(),
+        }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(serialized));
+    } catch (err) {
+        console.error("[RunOnRunpod] saveJobs error:", err);
+    }
+}
+
+async function loadJobs() {
+    let raw;
+    try {
+        raw = localStorage.getItem(STORAGE_KEY);
+    } catch (err) {
+        return;
+    }
+    if (!raw) return;
+
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (err) {
+        return;
+    }
+    if (!Array.isArray(parsed)) return;
+
+    const restored = parsed.map(j => ({
+        id: j.id,
+        state: j.state,
+        message: j.message || "",
+        files: Array.isArray(j.files) ? j.files : [],
+        uploadPercent: -1,
+        fetchResults: null,
+        createdAt: new Date(j.createdAt),
+    }));
+
+    // Verify completed-job files still exist on disk; drop missing files
+    // and drop the whole card if a completed job ends up with zero files.
+    const allFiles = [...new Set(restored.flatMap(j => j.files))];
+    let existingSet = new Set(allFiles);
+    if (allFiles.length > 0) {
+        try {
+            const resp = await api.fetchApi("/RunOnRunpod/check-local-outputs", {
+                method: "POST",
+                body: JSON.stringify({ files: allFiles }),
+            });
+            const data = await resp.json();
+            existingSet = new Set(data.existing || []);
+        } catch (err) {
+            console.error("[RunOnRunpod] check-local-outputs error:", err);
+        }
+    }
+
+    const filtered = restored.filter(j => {
+        j.files = j.files.filter(f => existingSet.has(f));
+        if (j.state === JOB_STATE.COMPLETED && j.files.length === 0) return false;
+        return true;
+    });
+
+    jobs = filtered;
+    renderJobList();
+    saveJobs();
+}
+
 function addJob(jobId) {
     const job = {
         id: jobId,
@@ -34,6 +128,7 @@ function addJob(jobId) {
     };
     jobs.unshift(job);
     renderJobList();
+    saveJobs();
     return job;
 }
 
@@ -46,6 +141,7 @@ function updateJob(jobId, updates) {
     if (!job) return;
     Object.assign(job, updates);
     renderJobCard(job);
+    saveJobs();
 }
 
 // --- Settings helper ---
@@ -259,6 +355,7 @@ async function removeJob(jobId) {
     const idx = jobs.findIndex(j => j.id === jobId);
     if (idx >= 0) jobs.splice(idx, 1);
     renderJobList();
+    saveJobs();
 }
 
 // --- Render full job list ---
@@ -937,6 +1034,14 @@ app.registerExtension({
             defaultValue: false,
         },
         {
+            id: "Run on Runpod.Job.historySize",
+            name: "Number of jobs kept in history",
+            type: "number",
+            defaultValue: 20,
+            tooltip: "How many finished job cards to remember across page reloads and ComfyUI restarts. Set to 0 to disable persistence entirely.",
+            attrs: { min: 0, max: 200, step: 1 },
+        },
+        {
             id: "Run on Runpod.Keys.hfToken",
             name: "HuggingFace Token",
             type: "text",
@@ -1197,6 +1302,7 @@ app.registerExtension({
 
                     jobs = [];
                     renderJobList();
+                    saveJobs();
                 });
 
                 const cleanAllBtn = document.createElement("button");
@@ -1235,6 +1341,7 @@ app.registerExtension({
                 el.appendChild(container);
 
                 renderJobList();
+                loadJobs();
             },
         });
 

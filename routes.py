@@ -855,6 +855,31 @@ async def check_latency(request):
     return web.json_response({"results": results})
 
 
+@routes.post("/RunOnRunpod/check-local-outputs")
+async def check_local_outputs(request):
+    """Return which of the given relative output paths still exist on disk.
+
+    Used by the frontend on page load to filter persisted job cards whose
+    files have since been deleted by the user.
+    """
+    data = await request.json()
+    rel_paths = data.get("files") or []
+
+    output_dir = os.path.realpath(_get_output_directory())
+    existing: list[str] = []
+
+    for rel_path in rel_paths:
+        if not isinstance(rel_path, str) or not rel_path:
+            continue
+        candidate = os.path.realpath(os.path.join(output_dir, rel_path))
+        if not (candidate == output_dir or candidate.startswith(output_dir + os.sep)):
+            continue
+        if os.path.isfile(candidate):
+            existing.append(rel_path)
+
+    return web.json_response({"existing": existing})
+
+
 @routes.post("/RunOnRunpod/delete-local-outputs")
 async def delete_local_outputs(request):
     """Delete files under ComfyUI's output directory by relative path.
