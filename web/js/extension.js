@@ -1404,7 +1404,12 @@ app.registerExtension({
 
             switch (evt) {
                 case "queued":
-                    updateJob(job_id, { state: JOB_STATE.QUEUED, message: "Queued on RunPod...", uploadPercent: -1 });
+                    updateJob(job_id, {
+                        state: JOB_STATE.QUEUED,
+                        message: "Queued on RunPod...",
+                        uploadPercent: -1,
+                        fetchResults: null,
+                    });
                     break;
                 case "running":
                     updateJob(job_id, { state: JOB_STATE.RUNNING, message: "Running..." });
