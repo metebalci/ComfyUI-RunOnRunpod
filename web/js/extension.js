@@ -144,6 +144,44 @@ function updateJob(jobId, updates) {
     saveJobs();
 }
 
+// --- One-shot migration for renamed setting IDs ---
+// Older versions stored these under different IDs. On startup, if the
+// old key holds a non-default value and the new key is still at its
+// default, copy it forward. Heuristic: we can't distinguish "user
+// explicitly set the new key to its default" from "never touched it",
+// so we only migrate when the old value diverges from the default.
+function migrateSettings() {
+    const moves = [
+        {
+            oldId: "Run on Runpod.Job.deleteInputsAfterJob",
+            newId: "Run on Runpod.Storage.deleteInputsAfterJob",
+            defaultValue: false,
+        },
+        {
+            oldId: "Run on Runpod.Job.deleteOutputsAfterJob",
+            newId: "Run on Runpod.Storage.deleteOutputsAfterJob",
+            defaultValue: true,
+        },
+        {
+            oldId: "Run on Runpod.Job.downloadFromTheSource",
+            newId: "Run on Runpod.Job.downloadModelsFromTheSource",
+            defaultValue: false,
+        },
+    ];
+    for (const { oldId, newId, defaultValue } of moves) {
+        try {
+            const oldVal = app.extensionManager.setting.get(oldId);
+            if (oldVal === undefined || oldVal === defaultValue) continue;
+            const newVal = app.extensionManager.setting.get(newId);
+            if (newVal !== defaultValue) continue;
+            app.extensionManager.setting.set(newId, oldVal);
+            console.log(`[RunOnRunpod] Migrated setting ${oldId} -> ${newId} (${oldVal})`);
+        } catch (err) {
+            console.error(`[RunOnRunpod] migrate ${oldId} error:`, err);
+        }
+    }
+}
+
 // --- Settings helper ---
 function getSettings() {
     return {
@@ -154,10 +192,10 @@ function getSettings() {
         endpointUrl: app.extensionManager.setting.get("Run on Runpod.Storage.endpointUrl") || "",
         region: app.extensionManager.setting.get("Run on Runpod.Storage.region") || "",
         bucketName: app.extensionManager.setting.get("Run on Runpod.Storage.bucketName") || "",
-        deleteInputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteInputsAfterJob") ?? false,
-        deleteOutputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteOutputsAfterJob") ?? true,
+        deleteInputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Storage.deleteInputsAfterJob") ?? false,
+        deleteOutputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Storage.deleteOutputsAfterJob") ?? true,
         uploadMissingModels: app.extensionManager.setting.get("Run on Runpod.Job.uploadMissingModels") ?? true,
-        downloadFromTheSource: app.extensionManager.setting.get("Run on Runpod.Job.downloadFromTheSource") ?? false,
+        downloadModelsFromTheSource: app.extensionManager.setting.get("Run on Runpod.Job.downloadModelsFromTheSource") ?? false,
         civitaiApiKey: app.extensionManager.setting.get("Run on Runpod.Keys.civitaiApiKey") || "",
         hfToken: app.extensionManager.setting.get("Run on Runpod.Keys.hfToken") || "",
     };
@@ -1016,8 +1054,8 @@ app.registerExtension({
 
     settings: [
         {
-            id: "Run on Runpod.Job.downloadFromTheSource",
-            name: "Download from the source when possible",
+            id: "Run on Runpod.Job.downloadModelsFromTheSource",
+            name: "Download models from the source when possible",
             type: "boolean",
             defaultValue: false,
             tooltip: "When enabled, missing models are downloaded directly by the worker from their original source (ComfyUI Manager database, HuggingFace cache URL, or CivitAI) instead of being uploaded from your machine. Much faster for large checkpoints since the worker has datacenter bandwidth. File hashes may be sent to CivitAI to identify models when enabled.",
@@ -1029,14 +1067,14 @@ app.registerExtension({
             defaultValue: true,
         },
         {
-            id: "Run on Runpod.Job.deleteOutputsAfterJob",
-            name: "Delete outputs from network volume after job",
+            id: "Run on Runpod.Storage.deleteOutputsAfterJob",
+            name: "Delete output files from network volume after job finishes",
             type: "boolean",
             defaultValue: true,
         },
         {
-            id: "Run on Runpod.Job.deleteInputsAfterJob",
-            name: "Delete inputs from network volume after job",
+            id: "Run on Runpod.Storage.deleteInputsAfterJob",
+            name: "Delete input files from network volume after job finishes",
             type: "boolean",
             defaultValue: false,
         },
@@ -1123,6 +1161,8 @@ app.registerExtension({
     ],
 
     async setup() {
+        migrateSettings();
+
         // Inject styles
         const style = document.createElement("style");
         style.textContent = STYLES;

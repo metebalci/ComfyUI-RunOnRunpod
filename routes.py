@@ -451,7 +451,7 @@ async def _do_submit(data: dict):
                 local_path = _find_model_file(subdir, filename)
                 missing.append((subdir, filename, local_path))
 
-            use_source = settings.get("downloadFromTheSource", False)
+            use_source = settings.get("downloadModelsFromTheSource", False)
             worker_downloads: list[dict] = []
             upload_queue: list[tuple[str, str, str]] = []  # (subdir, filename, local_path)
             # filename -> (subdir, filename, local_path) so worker failures
