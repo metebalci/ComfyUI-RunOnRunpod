@@ -301,6 +301,161 @@ async function cancelJob(jobId) {
     updateJob(jobId, { state: JOB_STATE.CANCELLED, message: "Cancelled" });
 }
 
+// Latency check modal — opened immediately on button click and filled in
+// live as per-region results stream back via WebSocket events.
+let _latencyModal = null;
+
+function _renderLatencyRows(results) {
+    const sorted = results
+        .filter(r => r.median_ms != null)
+        .slice()
+        .sort((a, b) => {
+            if (a.median_ms !== b.median_ms) return a.median_ms - b.median_ms;
+            return (a.stdev_ms || 0) - (b.stdev_ms || 0);
+        });
+    const best = sorted.length > 0 ? sorted[0].region : null;
+    return sorted.map(r => {
+        const cls = r.region === best ? "runpod-best" : "";
+        return `<tr class="${cls}">
+            <td>${r.region}</td>
+            <td class="num">${r.median_ms}</td>
+            <td class="num">${r.min_ms}</td>
+            <td class="num">${r.max_ms}</td>
+            <td class="num">${r.stdev_ms}</td>
+        </tr>`;
+    }).join("");
+}
+
+function showLatencyModal() {
+    if (_latencyModal) return _latencyModal;
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "runpod-modal-backdrop";
+    const modal = document.createElement("div");
+    modal.className = "runpod-modal";
+
+    modal.innerHTML = `
+        <h3>Runpod datacenter latency</h3>
+        <div class="runpod-latency-status">Loading regions...</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Region</th>
+                    <th style="text-align:right;">Median (ms)</th>
+                    <th style="text-align:right;">Min</th>
+                    <th style="text-align:right;">Max</th>
+                    <th style="text-align:right;">StdDev</th>
+                </tr>
+            </thead>
+            <tbody class="runpod-latency-body"></tbody>
+        </table>
+        <div style="clear:both;"><button class="runpod-modal-close">Close</button></div>
+    `;
+
+    const state = {
+        backdrop,
+        modal,
+        statusEl: modal.querySelector(".runpod-latency-status"),
+        bodyEl: modal.querySelector(".runpod-latency-body"),
+        total: 0,
+        completed: 0,
+        results: [],
+        done: false,
+    };
+
+    const close = () => {
+        backdrop.remove();
+        _latencyModal = null;
+        document.removeEventListener("keydown", onKey);
+    };
+    function onKey(e) {
+        if (e.key === "Escape") close();
+    }
+    backdrop.addEventListener("click", (e) => {
+        if (e.target === backdrop) close();
+    });
+    modal.querySelector(".runpod-modal-close").addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+
+    _latencyModal = state;
+    return state;
+}
+
+function _updateLatencyStatus(state) {
+    if (state.done) {
+        const shown = state.results.filter(r => r.median_ms != null).length;
+        const dropped = state.total - shown;
+        state.statusEl.textContent = dropped > 0
+            ? `Done — ${shown} reachable, ${dropped} unreachable (hidden)`
+            : `Done — ${shown} regions`;
+    } else if (state.total > 0) {
+        state.statusEl.textContent = `Checking ${state.completed}/${state.total} regions...`;
+    }
+}
+
+function handleLatencyStart(total) {
+    const state = _latencyModal;
+    if (!state) return;
+    state.total = total;
+    state.completed = 0;
+    state.results = [];
+    state.bodyEl.innerHTML = "";
+    _updateLatencyStatus(state);
+}
+
+function handleLatencyProgress(result) {
+    const state = _latencyModal;
+    if (!state) return;
+    state.completed += 1;
+    if (result && result.median_ms != null) {
+        state.results.push(result);
+        state.bodyEl.innerHTML = _renderLatencyRows(state.results);
+    }
+    _updateLatencyStatus(state);
+}
+
+function handleLatencyDone(results) {
+    const state = _latencyModal;
+    if (!state) return;
+    state.done = true;
+    // Final authoritative list from the backend — replaces whatever we
+    // accumulated from the streaming events.
+    state.results = results || state.results;
+    state.bodyEl.innerHTML = _renderLatencyRows(state.results);
+    _updateLatencyStatus(state);
+}
+
+function handleLatencyError(error) {
+    const state = _latencyModal;
+    if (!state) return;
+    state.done = true;
+    state.statusEl.textContent = `Failed: ${error}`;
+    state.statusEl.style.color = "#cc4444";
+}
+
+async function checkLatency(btn) {
+    btn.disabled = true;
+    showLatencyModal();
+
+    try {
+        const res = await api.fetchApi("/RunOnRunpod/check-latency", { method: "POST" });
+        const data = await res.json();
+        if (data.error) {
+            handleLatencyError(data.error);
+        } else {
+            handleLatencyDone(data.results || []);
+        }
+    } catch (err) {
+        console.error("[RunOnRunpod] check-latency error:", err);
+        handleLatencyError(String(err));
+    }
+
+    btn.disabled = false;
+}
+
 async function cleanFolder(folder, btn) {
     const s = getSettings();
     if (!confirm(`Delete all files from ${folder}/ on s3://${s.bucketName} at ${s.endpointUrl}?`)) return;
@@ -377,8 +532,12 @@ const STYLES = `
         padding: 10px 12px;
         border-bottom: 1px solid #333;
         display: flex;
+        flex-direction: column;
         gap: 6px;
-        flex-wrap: wrap;
+    }
+    .runpod-toolbar-row {
+        display: flex;
+        gap: 6px;
     }
     .runpod-btn {
         flex: 1;
@@ -491,6 +650,77 @@ const STYLES = `
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+    .runpod-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+    }
+    .runpod-modal {
+        background: #1e1e1e;
+        border: 1px solid #444;
+        border-radius: 8px;
+        padding: 16px 20px;
+        min-width: 360px;
+        max-width: 520px;
+        max-height: 80vh;
+        overflow-y: auto;
+        color: #ddd;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    }
+    .runpod-modal h3 {
+        margin: 0 0 12px 0;
+        font-size: 14px;
+        color: #fff;
+    }
+    .runpod-latency-status {
+        font-size: 11px;
+        color: #888;
+        margin-bottom: 8px;
+    }
+    .runpod-modal table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+    .runpod-modal th, .runpod-modal td {
+        padding: 4px 8px;
+        text-align: left;
+        border-bottom: 1px solid #333;
+    }
+    .runpod-modal th {
+        color: #888;
+        font-weight: 500;
+    }
+    .runpod-modal td.num {
+        text-align: right;
+        font-family: monospace;
+    }
+    .runpod-modal .runpod-best {
+        color: #44cc44;
+        font-weight: 600;
+    }
+    .runpod-modal .runpod-unreachable {
+        color: #666;
+    }
+    .runpod-modal-close {
+        margin-top: 12px;
+        float: right;
+        background: #2a2a2a;
+        border: 1px solid #555;
+        color: #ccc;
+        padding: 4px 12px;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 12px;
+    }
+    .runpod-modal-close:hover {
+        background: #3a3a3a;
+        color: #fff;
     }
     .runpod-job-cancel {
         background: none;
@@ -624,7 +854,25 @@ app.registerExtension({
 
         // WebSocket event handling — route to correct job
         api.addEventListener("runonrunpod", (event) => {
-            const { event: evt, job_id, prep_id, message, files, error, percent, uploaded_mb, total_mb, results } = event.detail;
+            const { event: evt, job_id, prep_id, message, files, error, percent, uploaded_mb, total_mb, results, total, result } = event.detail;
+
+            // Latency check events — bypass the job list entirely.
+            if (evt === "latency_start") {
+                handleLatencyStart(total || 0);
+                return;
+            }
+            if (evt === "latency_progress") {
+                handleLatencyProgress(result || {});
+                return;
+            }
+            if (evt === "latency_done") {
+                handleLatencyDone(results || []);
+                return;
+            }
+            if (evt === "latency_error") {
+                handleLatencyError(error || "unknown error");
+                return;
+            }
 
             // For progress/upload/fetch events during preparation, route by prep_id
             if (evt === "progress" || evt === "upload_progress" || evt === "fetch_progress") {
@@ -800,10 +1048,24 @@ app.registerExtension({
                     renderJobList();
                 });
 
-                toolbar.appendChild(runBtn);
-                toolbar.appendChild(cleanInputsBtn);
-                toolbar.appendChild(cleanOutputsBtn);
-                toolbar.appendChild(cleanJobsBtn);
+                const row1 = document.createElement("div");
+                row1.className = "runpod-toolbar-row";
+                row1.appendChild(runBtn);
+                row1.appendChild(cleanInputsBtn);
+                row1.appendChild(cleanOutputsBtn);
+                row1.appendChild(cleanJobsBtn);
+                toolbar.appendChild(row1);
+
+                const latencyBtn = document.createElement("button");
+                latencyBtn.className = "runpod-btn clean";
+                latencyBtn.textContent = "Check Latency";
+                latencyBtn.title = "Measure TCP connect latency to every RunPod S3 datacenter";
+                latencyBtn.addEventListener("click", () => checkLatency(latencyBtn));
+
+                const row2 = document.createElement("div");
+                row2.className = "runpod-toolbar-row";
+                row2.appendChild(latencyBtn);
+                toolbar.appendChild(row2);
 
                 // Job list (scrollable)
                 jobListEl = document.createElement("div");

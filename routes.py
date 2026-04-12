@@ -8,6 +8,7 @@ from server import PromptServer
 
 from .s3_utils import get_s3_client, upload_file, upload_file_dedup, download_file, delete_objects, list_objects, key_exists
 from .model_lookup import lookup_model
+from .latency import check_all_regions
 
 _PREFIX = "[RunOnRunpod]"
 
@@ -790,6 +791,29 @@ async def purge_queue(request):
         "cancelled_preps": len(prep_ids),
         "purge_result": purge_result,
     })
+
+
+@routes.post("/RunOnRunpod/check-latency")
+async def check_latency(request):
+    """Measure TCP connect latency to every Runpod S3 datacenter. Streams
+    per-region progress to the frontend via WebSocket events so the modal
+    can fill in its table as results arrive, rather than making the user
+    stare at a spinner for the whole run.
+    """
+    def _on_start(total: int):
+        _send_event("latency_start", {"total": total})
+
+    def _on_progress(result: dict):
+        _send_event("latency_progress", {"result": result})
+
+    try:
+        results = await check_all_regions(on_progress=_on_progress, on_start=_on_start)
+    except Exception as e:
+        print(_PREFIX, f"check-latency failed: {e}")
+        _send_event("latency_error", {"error": str(e)})
+        return web.json_response({"error": str(e)}, status=500)
+    _send_event("latency_done", {"results": results})
+    return web.json_response({"results": results})
 
 
 @routes.post("/RunOnRunpod/clean")
