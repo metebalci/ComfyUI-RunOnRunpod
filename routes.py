@@ -327,6 +327,16 @@ async def _runpod_streaming_action(
                     except Exception as cb_exc:
                         print(_PREFIX, f"streaming on_progress error: {cb_exc}")
             elif status == "COMPLETED":
+                # Pipe the final output through on_progress too — when a
+                # fast action finishes between two polls, the runtime
+                # serves COMPLETED directly and the worker's last
+                # progress_update never reaches the client. The COMPLETED
+                # output already contains the final results state.
+                if isinstance(output, dict) and output != last_progress:
+                    try:
+                        on_progress(output)
+                    except Exception as cb_exc:
+                        print(_PREFIX, f"streaming on_progress error: {cb_exc}")
                 return output if isinstance(output, dict) else {}
             elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
                 error = status_result.get("error") or (isinstance(output, dict) and output.get("error")) or status

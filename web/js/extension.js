@@ -561,14 +561,38 @@ async function submitJob() {
     try {
         const prompt = await app.graphToPrompt();
 
-        // Pull the workflow's models[] metadata if the template author
-        // included it. ComfyUI tutorial templates ship with this — it
-        // names every model needed and a canonical download URL,
-        // which the backend uses as the highest-priority source.
+        // Pull each loader node's models[] metadata. ComfyUI tutorial
+        // templates ship with this on each loader node's properties:
+        //   nodes[i].properties.models = [{name, url, directory}, ...]
+        // Walks the workflow recursively because nodes can live inside
+        // subgraph definitions, not just at the top level of nodes[].
+        // The backend matches by filename and uses the URL as the
+        // highest-priority source (above Manager DB / HF cache /
+        // CivitAI lookups), so the worker can download the file
+        // directly without the user needing it locally first.
         const wf = prompt.workflow || {};
-        const workflowModels = (wf.models && Array.isArray(wf.models) ? wf.models : null)
-            || (wf.extra && Array.isArray(wf.extra.models) ? wf.extra.models : null)
-            || [];
+        const workflowModels = [];
+        const seenModelNames = new Set();
+        function collectModels(obj) {
+            if (!obj || typeof obj !== "object") return;
+            if (Array.isArray(obj)) {
+                for (const item of obj) collectModels(item);
+                return;
+            }
+            if (obj.properties && Array.isArray(obj.properties.models)) {
+                for (const m of obj.properties.models) {
+                    if (m && m.name && m.url && !seenModelNames.has(m.name)) {
+                        workflowModels.push(m);
+                        seenModelNames.add(m.name);
+                    }
+                }
+            }
+            for (const key in obj) {
+                if (key === "properties") continue;
+                collectModels(obj[key]);
+            }
+        }
+        collectModels(wf);
 
         const res = await api.fetchApi("/RunOnRunpod/submit", {
             method: "POST",
