@@ -2,6 +2,11 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 // --- Job state constants ---
+// FAILED is reserved for worker-side workflow failures (check ComfyUI worker
+// logs). ERROR is for pre-submission failures (bad credentials, upload
+// errors, network issues) — fixable locally. TIMED_OUT is distinct so users
+// know to check endpoint timeout / worker availability rather than workflow
+// correctness.
 const JOB_STATE = {
     PREPARING: "preparing",
     QUEUED: "queued",
@@ -9,6 +14,8 @@ const JOB_STATE = {
     COMPLETED: "completed",
     FAILED: "failed",
     CANCELLED: "cancelled",
+    TIMED_OUT: "timed_out",
+    ERROR: "error",
 };
 
 // --- Job list (newest first) ---
@@ -84,13 +91,16 @@ function stateBadge(state) {
         [JOB_STATE.RUNNING]: { bg: "#1a3a2a", text: "#44cc88" },
         [JOB_STATE.COMPLETED]: { bg: "#1a3a1a", text: "#44cc44" },
         [JOB_STATE.FAILED]: { bg: "#3a1a1a", text: "#cc4444" },
-        [JOB_STATE.CANCELLED]: { bg: "#3a1a1a", text: "#cc4444" },
+        [JOB_STATE.CANCELLED]: { bg: "#2a2a2a", text: "#888" },
+        [JOB_STATE.TIMED_OUT]: { bg: "#3a2a1a", text: "#cc8844" },
+        [JOB_STATE.ERROR]: { bg: "#3a1a1a", text: "#cc4444" },
     };
     const c = colors[state] || { bg: "#2a2a2a", text: "#888" };
+    const label = state === JOB_STATE.TIMED_OUT ? "timed out" : state;
     return `<span style="
         display:inline-block; padding:2px 6px; border-radius:3px; font-size:11px; font-weight:600;
         background:${c.bg}; color:${c.text};
-    ">${state}</span>`;
+    ">${label}</span>`;
 }
 
 // --- Render a single job card ---
@@ -234,8 +244,12 @@ async function submitJob() {
                 job.state = JOB_STATE.CANCELLED;
                 job.message = "Cancelled";
             } else {
+                // Pre-submission errors (credentials, validation, upload
+                // failures) use ERROR so users know to fix it locally —
+                // distinct from FAILED which means the workflow ran on the
+                // worker and that is where to look.
                 console.error("[RunOnRunpod] Submit error:", data.error);
-                job.state = JOB_STATE.FAILED;
+                job.state = JOB_STATE.ERROR;
                 job.message = data.error;
             }
             renderJobList();
@@ -251,7 +265,7 @@ async function submitJob() {
         }
     } catch (err) {
         console.error("[RunOnRunpod] Submit error:", err);
-        job.state = JOB_STATE.FAILED;
+        job.state = JOB_STATE.ERROR;
         job.message = String(err);
         renderJobList();
     }
@@ -663,7 +677,21 @@ app.registerExtension({
                     console.error(`[RunOnRunpod] Job ${job_id} failed: ${error}`);
                     updateJob(job_id, {
                         state: JOB_STATE.FAILED,
-                        message: error || "Unknown error",
+                        message: error || "Workflow failed on worker",
+                    });
+                    break;
+                case "cancelled":
+                    console.log(`[RunOnRunpod] Job ${job_id} cancelled`);
+                    updateJob(job_id, {
+                        state: JOB_STATE.CANCELLED,
+                        message: "Cancelled",
+                    });
+                    break;
+                case "timed_out":
+                    console.warn(`[RunOnRunpod] Job ${job_id} timed out: ${error}`);
+                    updateJob(job_id, {
+                        state: JOB_STATE.TIMED_OUT,
+                        message: error || "Timed out",
                     });
                     break;
             }

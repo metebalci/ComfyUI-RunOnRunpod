@@ -618,10 +618,21 @@ async def _poll_and_finish(job_id: str, settings: dict, input_files: dict):
                 downloaded = await _download_and_cleanup(settings, output_files, input_files)
                 _send_event("completed", {"job_id": job_id, "files": downloaded})
                 return
-            elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
-                error = result.get("error") or result.get("output", {}).get("error") or status
-                print(_PREFIX, f"Job {job_id}: {status}: {error}")
+            elif status == "FAILED":
+                error = result.get("error") or result.get("output", {}).get("error") or "Job failed"
+                print(_PREFIX, f"Job {job_id}: FAILED: {error}")
                 _send_event("failed", {"job_id": job_id, "error": str(error)})
+                return
+            elif status == "CANCELLED":
+                print(_PREFIX, f"Job {job_id}: CANCELLED")
+                _send_event("cancelled", {"job_id": job_id})
+                return
+            elif status == "TIMED_OUT":
+                print(_PREFIX, f"Job {job_id}: TIMED_OUT")
+                _send_event("timed_out", {
+                    "job_id": job_id,
+                    "error": "Job timed out — worker did not start or stopped reporting before the endpoint timeout",
+                })
                 return
 
     except asyncio.CancelledError:

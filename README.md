@@ -55,15 +55,11 @@ See [Setup](#setup) below for more detail on each step, including building a cus
 
 ### 1. Prepare the network volume
 
-Create a RunPod network volume and set up the following directory structure:
+Create a RunPod network volume. No directory structure needs to be set up in advance — the plugin and worker create what they need on first use:
 
-```
-/models/         # ComfyUI models (checkpoints, loras, etc.)
-/inputs/         # Input files (uploaded by the plugin)
-/outputs/        # Output files (written by the worker)
-```
-
-Models are automatically uploaded to the network volume when you submit a workflow (if "Upload missing models automatically" is enabled). You can also upload models manually using AWS CLI or any S3-compatible client with RunPod's S3 API credentials.
+- `inputs/` — managed entirely by the plugin. Input files referenced by the workflow (images, video, audio) are uploaded here automatically on each submit. You cannot bypass this by uploading inputs manually, since the plugin only recognizes files it has uploaded itself (content-hashed keys).
+- `outputs/` — created by the worker when it writes results.
+- `models/` — only needed if you want to upload models manually (with AWS CLI or any S3-compatible client against RunPod's S3 API). In that case, create the subdirectories matching ComfyUI's model layout (`models/checkpoints/`, `models/loras/`, `models/vae/`, etc.). If you rely on the plugin's automatic model upload (default) or the "Download from the source" feature, you don't need to create anything — the worker writes to the right subdirectories on demand.
 
 ### 2. Prepare the worker
 
@@ -142,7 +138,10 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
    - **queued** — waiting for a RunPod worker
    - **running** — workflow is executing
    - **completed** — outputs downloaded to your local ComfyUI output directory
-   - **failed** — check the error message on the job card
+   - **failed** — the workflow ran on the worker and failed; check the worker logs on the RunPod dashboard
+   - **cancelled** — job was cancelled from the UI, dashboard, or API
+   - **timed out** — the endpoint's execution timeout was exceeded (no worker available in time, or the worker stopped reporting)
+   - **error** — something failed before the job reached the worker (bad credentials, S3 error, upload failure, network issue) — fix it locally and retry
 5. Click **X** on a job card to cancel it
 6. Use **Clean Inputs** / **Clean Outputs** to remove files from the network volume
 7. Use **Clean Jobs** to clear finished jobs from the list
