@@ -85,21 +85,27 @@ function findPreview(files) {
 
 // --- State badge colors ---
 function stateBadge(state) {
-    const colors = {
-        [JOB_STATE.PREPARING]: { bg: "#3a3a1a", text: "#cccc44" },
-        [JOB_STATE.QUEUED]: { bg: "#1a2a3a", text: "#4488cc" },
-        [JOB_STATE.RUNNING]: { bg: "#1a3a2a", text: "#44cc88" },
-        [JOB_STATE.COMPLETED]: { bg: "#1a3a1a", text: "#44cc44" },
-        [JOB_STATE.FAILED]: { bg: "#3a1a1a", text: "#cc4444" },
-        [JOB_STATE.CANCELLED]: { bg: "#2a2a2a", text: "#888" },
-        [JOB_STATE.TIMED_OUT]: { bg: "#3a2a1a", text: "#cc8844" },
-        [JOB_STATE.ERROR]: { bg: "#3a1a1a", text: "#cc4444" },
+    // Badge colors pull from PrimeVue palette tokens so they adapt to
+    // light/dark themes. Each state uses a palette color for the text and
+    // a 20%-opacity tint of the same color for the background via
+    // color-mix, which gives a subtle filled chip that reads well on both
+    // themes without needing hand-tuned dark/light pairs.
+    const palettes = {
+        [JOB_STATE.PREPARING]: "var(--p-amber-500, #cccc44)",
+        [JOB_STATE.QUEUED]: "var(--p-blue-500, #4488cc)",
+        [JOB_STATE.RUNNING]: "var(--p-emerald-500, #44cc88)",
+        [JOB_STATE.COMPLETED]: "var(--p-green-500, #44cc44)",
+        [JOB_STATE.FAILED]: "var(--p-red-500, #cc4444)",
+        [JOB_STATE.CANCELLED]: "var(--p-text-muted-color, #888)",
+        [JOB_STATE.TIMED_OUT]: "var(--p-orange-500, #cc8844)",
+        [JOB_STATE.ERROR]: "var(--p-red-500, #cc4444)",
     };
-    const c = colors[state] || { bg: "#2a2a2a", text: "#888" };
+    const color = palettes[state] || "var(--p-text-muted-color, #888)";
     const label = state === JOB_STATE.TIMED_OUT ? "timed out" : state;
     return `<span style="
-        display:inline-block; padding:2px 6px; border-radius:3px; font-size:11px; font-weight:600;
-        background:${c.bg}; color:${c.text};
+        display:inline-block; padding:2px 6px; border-radius:4px; font-size:11px; font-weight:600;
+        background:color-mix(in srgb, ${color} 20%, transparent);
+        color:${color};
     ">${label}</span>`;
 }
 
@@ -583,7 +589,7 @@ const STYLES = `
         height: 40px;
         padding: 0 10px;
         border: 1px solid transparent;
-        border-radius: 4px;
+        border-radius: 8px;
         color: var(--p-text-color, #fff);
         cursor: pointer;
         font-size: 12px;
@@ -634,9 +640,9 @@ const STYLES = `
         padding: 8px;
     }
     .runpod-job-card {
-        background: #252525;
-        border: 1px solid #333;
-        border-radius: 6px;
+        background: var(--p-content-background, #252525);
+        border: 1px solid var(--p-content-border-color, #333);
+        border-radius: 8px;
         padding: 8px 10px;
         margin-bottom: 6px;
     }
@@ -648,7 +654,7 @@ const STYLES = `
     .runpod-job-id {
         font-family: monospace;
         font-size: 11px;
-        color: #666;
+        color: var(--p-text-muted-color, #666);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -656,11 +662,11 @@ const STYLES = `
     }
     .runpod-job-time {
         font-size: 11px;
-        color: #888;
+        color: var(--p-text-muted-color, #888);
     }
     .runpod-job-message {
         font-size: 12px;
-        color: #aaa;
+        color: var(--p-text-color, #aaa);
         margin-top: 4px;
         word-break: break-word;
     }
@@ -670,7 +676,7 @@ const STYLES = `
     .runpod-job-progress {
         margin-top: 4px;
         height: 4px;
-        background: #333;
+        background: var(--p-content-border-color, #333);
         border-radius: 2px;
         overflow: hidden;
     }
@@ -679,7 +685,7 @@ const STYLES = `
     }
     .runpod-job-progress-bar {
         height: 100%;
-        background: #4488cc;
+        background: var(--p-primary-color, #4488cc);
         border-radius: 2px;
         transition: width 0.3s ease;
     }
@@ -691,7 +697,7 @@ const STYLES = `
     .runpod-fetch-list {
         margin-top: 6px;
         font-size: 11px;
-        color: #aaa;
+        color: var(--p-text-color, #aaa);
         max-height: 120px;
         overflow-y: auto;
     }
@@ -711,25 +717,25 @@ const STYLES = `
         z-index: 9999;
     }
     .runpod-modal {
-        background: #1e1e1e;
-        border: 1px solid #444;
+        background: var(--p-content-background, #1e1e1e);
+        border: 1px solid var(--p-content-border-color, #444);
         border-radius: 8px;
         padding: 16px 20px;
         min-width: 360px;
         max-width: 520px;
         max-height: 80vh;
         overflow-y: auto;
-        color: #ddd;
+        color: var(--p-text-color, #ddd);
         box-shadow: 0 8px 32px rgba(0,0,0,0.6);
     }
     .runpod-modal h3 {
         margin: 0 0 12px 0;
         font-size: 14px;
-        color: #fff;
+        color: var(--p-text-color, #fff);
     }
     .runpod-latency-status {
         font-size: 11px;
-        color: #888;
+        color: var(--p-text-muted-color, #888);
         margin-bottom: 8px;
     }
     .runpod-modal table {
@@ -740,10 +746,10 @@ const STYLES = `
     .runpod-modal th, .runpod-modal td {
         padding: 4px 8px;
         text-align: left;
-        border-bottom: 1px solid #333;
+        border-bottom: 1px solid var(--p-content-border-color, #333);
     }
     .runpod-modal th {
-        color: #888;
+        color: var(--p-text-muted-color, #888);
         font-weight: 500;
     }
     .runpod-modal td.num {
@@ -751,53 +757,53 @@ const STYLES = `
         font-family: monospace;
     }
     .runpod-modal .runpod-best {
-        color: #44cc44;
+        color: var(--p-green-500, #44cc44);
         font-weight: 600;
     }
     .runpod-modal .runpod-unreachable {
-        color: #666;
+        color: var(--p-text-muted-color, #666);
     }
     .runpod-modal-close {
         margin-top: 12px;
         float: right;
-        background: #2a2a2a;
-        border: 1px solid #555;
-        color: #ccc;
+        background: var(--p-content-background, #2a2a2a);
+        border: 1px solid var(--p-content-border-color, #555);
+        color: var(--p-text-color, #ccc);
         padding: 4px 12px;
-        border-radius: 3px;
+        border-radius: 6px;
         cursor: pointer;
         font-size: 12px;
     }
     .runpod-modal-close:hover {
-        background: #3a3a3a;
-        color: #fff;
+        background: var(--p-content-hover-background, #3a3a3a);
+        color: var(--p-text-color, #fff);
     }
     .runpod-job-cancel {
         background: none;
-        border: 1px solid #555;
-        border-radius: 3px;
-        color: #888;
+        border: 1px solid var(--p-content-border-color, #555);
+        border-radius: 4px;
+        color: var(--p-text-muted-color, #888);
         cursor: pointer;
         font-size: 10px;
         padding: 1px 5px;
         line-height: 1;
     }
     .runpod-job-cancel:hover {
-        background: #6e2a2a;
-        border-color: #8e3a3a;
-        color: #cc4444;
+        background: color-mix(in srgb, var(--p-red-600, #cc4444) 30%, transparent);
+        border-color: var(--p-red-500, #8e3a3a);
+        color: var(--p-red-500, #cc4444);
     }
     .runpod-warning {
         padding: 8px 12px;
         margin: 8px;
         font-size: 12px;
-        color: #cccc44;
-        background: #3a3a1a;
-        border: 1px solid #555522;
-        border-radius: 6px;
+        color: var(--p-amber-500, #cccc44);
+        background: color-mix(in srgb, var(--p-amber-500, #cccc44) 15%, transparent);
+        border: 1px solid color-mix(in srgb, var(--p-amber-500, #cccc44) 35%, transparent);
+        border-radius: 8px;
     }
     .runpod-empty {
-        color: #666;
+        color: var(--p-text-muted-color, #666);
         text-align: center;
         padding: 24px 12px;
         font-size: 12px;
