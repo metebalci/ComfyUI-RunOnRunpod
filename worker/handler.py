@@ -102,6 +102,25 @@ def get_node_list() -> list[str]:
     return list(resp.json().keys())
 
 
+def wait_for_comfy(timeout: int = 300) -> bool:
+    """Poll ComfyUI's /object_info until it answers or the timeout elapses.
+
+    Used by the ``ping`` action so the cold-start wait happens under the
+    plugin's "Waiting for worker..." message instead of leaking into the
+    next step ("Checking custom nodes...").
+    """
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            resp = requests.get(f"{COMFY_URL}/object_info", timeout=5)
+            if resp.ok:
+                return True
+        except requests.RequestException:
+            pass
+        time.sleep(1)
+    return False
+
+
 def run_fetch_models(job: dict, job_input: dict) -> dict:
     """Download models from their source URLs onto the network volume.
 
@@ -167,9 +186,11 @@ def handler(job):
     try:
         job_input = job["input"]
 
-        # Lightweight ping to check if worker is up
+        # Ping waits for ComfyUI to actually be reachable so the plugin's
+        # "Waiting for worker..." message covers the full cold-start.
         if job_input.get("action") == "ping":
-            return {"status": "ok"}
+            ready = wait_for_comfy()
+            return {"status": "ok" if ready else "comfy_not_ready"}
 
         # Return node list if requested
         if job_input.get("action") == "node_list":

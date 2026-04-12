@@ -142,7 +142,7 @@ function renderJobCard(job) {
 
     const cancelBtnHtml = isActive
         ? `<button class="runpod-job-cancel" data-job-id="${job.id}" title="Cancel">X</button>`
-        : `<button class="runpod-job-remove" data-job-id="${job.id}" title="Remove from list (also deletes local output files)">🗑</button>`;
+        : `<button class="runpod-job-remove" data-job-id="${job.id}" title="Remove from list (also deletes local output files)">X</button>`;
 
     let fetchListHtml = "";
     if (job.fetchResults && job.fetchResults.length > 0) {
@@ -663,14 +663,21 @@ const STYLES = `
        values in case an older PrimeVue build doesn't expose them. */
     .runpod-btn {
         flex: 1;
+        min-width: 0;
         height: 40px;
-        padding: 0 10px;
+        padding: 0 6px;
         border: 1px solid transparent;
         border-radius: 8px;
         color: var(--p-text-color, #fff);
         cursor: pointer;
         font-size: 12px;
         font-weight: 500;
+        line-height: 1.15;
+        text-align: center;
+        white-space: normal;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         transition: background 0.15s;
     }
     /* Run — green */
@@ -686,9 +693,6 @@ const STYLES = `
     .runpod-btn.clean {
         background: color-mix(in srgb, var(--p-amber-600, #d97706) 65%, transparent);
         border-color: color-mix(in srgb, var(--p-amber-600, #d97706) 85%, transparent);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
     }
     .runpod-btn.clean:hover {
         background: color-mix(in srgb, var(--p-amber-500, #f59e0b) 85%, transparent);

@@ -224,8 +224,8 @@ async def _runpod_action(endpoint_id: str, api_key: str, action: str, payload: d
         raise RuntimeError(result.get("error", f"Failed to submit {action}"))
 
     async with aiohttp.ClientSession() as session:
+        delay = 0.2
         while True:
-            await asyncio.sleep(2)
             async with session.get(
                 f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
                 headers=headers,
@@ -238,6 +238,9 @@ async def _runpod_action(endpoint_id: str, api_key: str, action: str, payload: d
             elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
                 error = status_result.get("error") or status_result.get("output", {}).get("error") or status
                 raise RuntimeError(f"Worker error: {error}")
+
+            await asyncio.sleep(delay)
+            delay = min(delay * 1.5, 2.0)
 
 
 async def _runpod_streaming_action(
@@ -269,8 +272,8 @@ async def _runpod_streaming_action(
 
     last_progress = None
     async with aiohttp.ClientSession() as session:
+        delay = 0.2
         while True:
-            await asyncio.sleep(2)
             async with session.get(
                 f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}",
                 headers=headers,
@@ -288,13 +291,14 @@ async def _runpod_streaming_action(
                         on_progress(output)
                     except Exception as cb_exc:
                         print(_PREFIX, f"streaming on_progress error: {cb_exc}")
-                continue
-
-            if status == "COMPLETED":
+            elif status == "COMPLETED":
                 return output if isinstance(output, dict) else {}
-            if status in ("FAILED", "CANCELLED", "TIMED_OUT"):
+            elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
                 error = status_result.get("error") or (isinstance(output, dict) and output.get("error")) or status
                 raise RuntimeError(f"Worker error: {error}")
+
+            await asyncio.sleep(delay)
+            delay = min(delay * 1.5, 2.0)
 
 
 @routes.post("/RunOnRunpod/cancel-prepare")
