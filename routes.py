@@ -482,28 +482,49 @@ async def _do_submit(data: dict):
                     else:
                         print(_PREFIX, f"Model not found locally: {subdir}/{filename}")
 
-            # Worker-side downloads.
-            if worker_downloads:
-                _send_event("progress", {
-                    "prep_id": prep_id,
-                    "message": f"Worker fetching {len(worker_downloads)} model(s) from source...",
+            # Unified model status tracking — all worker fetches and local
+            # uploads share a single ordered list so the job card can show
+            # every model with a per-file status icon.
+            planned_order: list[str] = []
+            model_status: dict[str, dict] = {}
+            for d in worker_downloads:
+                fname = os.path.basename(d["dest_path"])
+                if fname not in model_status:
+                    planned_order.append(fname)
+                    model_status[fname] = {"filename": fname, "status": "pending"}
+            for (_subdir, filename, _local_path) in upload_queue:
+                if filename not in model_status:
+                    planned_order.append(filename)
+                    model_status[filename] = {"filename": filename, "status": "pending"}
+
+            def _emit_model_progress(label: str, _pid=prep_id):
+                ordered = [model_status[f] for f in planned_order]
+                done = sum(1 for r in ordered if r.get("status") == "done")
+                _send_event("fetch_progress", {
+                    "prep_id": _pid,
+                    "message": f"{label} {done}/{len(ordered)}",
+                    "done": done,
+                    "total": len(ordered),
+                    "results": ordered,
                 })
 
-                def _fetch_progress(output: dict, _pid=prep_id):
-                    total = output.get("total") or len(worker_downloads)
-                    done = sum(1 for r in (output.get("results") or []) if r.get("status") == "done")
+            # Worker-side downloads.
+            if worker_downloads:
+                def _fetch_progress(output: dict):
+                    by_name = {r.get("filename"): r for r in (output.get("results") or [])}
                     current = output.get("current_filename") or ""
-                    label = f"Worker fetching {done}/{total}"
+                    for fname in [os.path.basename(d["dest_path"]) for d in worker_downloads]:
+                        existing = by_name.get(fname)
+                        if existing:
+                            model_status[fname] = existing
+                        elif fname == current and model_status[fname].get("status") == "pending":
+                            model_status[fname] = {"filename": fname, "status": "downloading"}
+                    label = "Fetching models"
                     if current:
-                        label += f": {current}"
-                    _send_event("fetch_progress", {
-                        "prep_id": _pid,
-                        "message": label,
-                        "done": done,
-                        "total": total,
-                        "current": current,
-                        "results": output.get("results") or [],
-                    })
+                        label = f"Fetching {current} —"
+                    _emit_model_progress(label)
+
+                _emit_model_progress("Fetching models")
 
                 try:
                     fetch_output = await _runpod_streaming_action(
@@ -533,16 +554,22 @@ async def _do_submit(data: dict):
                         if fallback:
                             print(_PREFIX, f"Worker failed {fname} ({result.get('error')}); falling back to local upload")
                             upload_queue.append(fallback)
+                            if fname not in model_status:
+                                planned_order.append(fname)
+                            model_status[fname] = {"filename": fname, "status": "pending"}
                         else:
                             print(_PREFIX, f"Worker failed {fname} with no local fallback available")
 
             # Local upload path (for misses + worker failures).
+            if upload_queue:
+                _emit_model_progress("Uploading models")
             for subdir, filename, local_path in upload_queue:
                 if prep_id in _cancelled_preps:
                     print(_PREFIX, "Submit cancelled during model upload")
                     return web.json_response({"error": "Cancelled"}, status=499)
                 s3_key = f"models/{subdir}/{filename}"
-                _send_event("progress", {"prep_id": prep_id, "message": f"Uploading model: {filename}"})
+                model_status[filename] = {"filename": filename, "status": "uploading"}
+                _emit_model_progress(f"Uploading {filename} —")
                 print(_PREFIX, f"Uploading missing model: {local_path} -> {s3_key}")
 
                 def _model_progress(uploaded, total, _fn=filename, _pid=prep_id):
@@ -557,7 +584,15 @@ async def _do_submit(data: dict):
                         "total_mb": round(mb_total, 1),
                     })
 
-                await asyncio.to_thread(upload_file, _s3_settings(settings), bucket, s3_key, local_path, _model_progress)
+                try:
+                    await asyncio.to_thread(upload_file, _s3_settings(settings), bucket, s3_key, local_path, _model_progress)
+                    model_status[filename] = {"filename": filename, "status": "done"}
+                except Exception as e:
+                    print(_PREFIX, f"Upload failed for {filename}: {e}")
+                    model_status[filename] = {"filename": filename, "status": "failed", "error": str(e)}
+                    _emit_model_progress("Uploading models")
+                    raise
+                _emit_model_progress("Uploading models")
 
     _send_event("progress", {"prep_id": prep_id, "message": "Submitting to RunPod..."})
 
@@ -814,6 +849,53 @@ async def check_latency(request):
         return web.json_response({"error": str(e)}, status=500)
     _send_event("latency_done", {"results": results})
     return web.json_response({"results": results})
+
+
+@routes.post("/RunOnRunpod/delete-local-outputs")
+async def delete_local_outputs(request):
+    """Delete files under ComfyUI's output directory by relative path.
+
+    Paths are clamped to stay within the output directory so a malformed
+    request cannot escape it. Missing files are silently ignored.
+    """
+    data = await request.json()
+    rel_paths = data.get("files") or []
+
+    output_dir = os.path.realpath(_get_output_directory())
+    deleted: list[str] = []
+    errors: list[dict] = []
+    parent_dirs: set[str] = set()
+
+    for rel_path in rel_paths:
+        if not isinstance(rel_path, str) or not rel_path:
+            continue
+        candidate = os.path.realpath(os.path.join(output_dir, rel_path))
+        if not (candidate == output_dir or candidate.startswith(output_dir + os.sep)):
+            errors.append({"file": rel_path, "error": "outside output dir"})
+            continue
+        try:
+            if os.path.isfile(candidate):
+                os.remove(candidate)
+                deleted.append(rel_path)
+                parent_dirs.add(os.path.dirname(candidate))
+                print(_PREFIX, f"Deleted local output: {candidate}")
+        except Exception as e:
+            print(_PREFIX, f"Failed to delete local output {candidate}: {e}")
+            errors.append({"file": rel_path, "error": str(e)})
+
+    # Walk up each parent and rmdir while empty, stopping at output_dir.
+    # os.rmdir only succeeds on empty dirs, so unrelated files are safe.
+    for start in parent_dirs:
+        current = start
+        while current != output_dir and current.startswith(output_dir + os.sep):
+            try:
+                os.rmdir(current)
+                print(_PREFIX, f"Removed empty output folder: {current}")
+            except OSError:
+                break
+            current = os.path.dirname(current)
+
+    return web.json_response({"deleted": deleted, "errors": errors})
 
 
 @routes.post("/RunOnRunpod/clean")

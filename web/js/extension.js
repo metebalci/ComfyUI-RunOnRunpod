@@ -142,19 +142,22 @@ function renderJobCard(job) {
 
     const cancelBtnHtml = isActive
         ? `<button class="runpod-job-cancel" data-job-id="${job.id}" title="Cancel">X</button>`
-        : "";
+        : `<button class="runpod-job-remove" data-job-id="${job.id}" title="Remove from list (also deletes local output files)">🗑</button>`;
 
     let fetchListHtml = "";
     if (job.fetchResults && job.fetchResults.length > 0) {
         const rows = job.fetchResults.map(r => {
             const icon = r.status === "done" ? "✓"
                 : r.status === "failed" ? "✗"
-                : "…";
+                : r.status === "downloading" ? "…"
+                : "○";
             const color = r.status === "done" ? "#44cc44"
                 : r.status === "failed" ? "#cc4444"
-                : "#cccc44";
+                : r.status === "downloading" ? "#cccc44"
+                : "var(--p-text-muted-color, #888)";
+            const nameStyle = r.status === "pending" ? "opacity:0.6;" : "";
             const title = r.error ? ` title="${r.error.replace(/"/g, "&quot;")}"` : "";
-            return `<div class="runpod-fetch-item"${title}><span style="color:${color};font-weight:600;">${icon}</span> ${r.filename}</div>`;
+            return `<div class="runpod-fetch-item"${title}><span style="color:${color};font-weight:600;">${icon}</span> <span style="${nameStyle}">${r.filename}</span></div>`;
         }).join("");
         fetchListHtml = `<div class="runpod-fetch-list">${rows}</div>`;
     }
@@ -182,6 +185,80 @@ function renderJobCard(job) {
             cancelJob(job.id);
         });
     }
+
+    const removeBtn = card.querySelector(".runpod-job-remove");
+    if (removeBtn) {
+        removeBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            removeJob(job.id);
+        });
+    }
+}
+
+function showRemoveJobDialog(fileCount) {
+    return new Promise((resolve) => {
+        const backdrop = document.createElement("div");
+        backdrop.className = "runpod-modal-backdrop";
+        const modal = document.createElement("div");
+        modal.className = "runpod-modal";
+        modal.innerHTML = `
+            <h3>Remove job</h3>
+            <p style="margin:8px 0 16px 0;">This job produced ${fileCount} output file(s).</p>
+            <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+                <button class="runpod-modal-close" data-action="cancel">Cancel</button>
+                <button class="runpod-modal-close" data-action="job-only">Delete Job Only</button>
+                <button class="runpod-modal-close" data-action="delete-files">Delete All Output Files</button>
+            </div>
+        `;
+
+        const finish = (action) => {
+            backdrop.remove();
+            document.removeEventListener("keydown", onKey);
+            resolve(action);
+        };
+        function onKey(e) {
+            if (e.key === "Escape") finish("cancel");
+        }
+        backdrop.addEventListener("click", (e) => {
+            if (e.target === backdrop) finish("cancel");
+        });
+        modal.querySelectorAll("button[data-action]").forEach(btn => {
+            btn.addEventListener("click", () => finish(btn.dataset.action));
+        });
+        document.addEventListener("keydown", onKey);
+
+        backdrop.appendChild(modal);
+        document.body.appendChild(backdrop);
+    });
+}
+
+async function removeJob(jobId) {
+    const job = findJob(jobId);
+    if (!job) return;
+
+    let deleteFiles = false;
+    if (job.files && job.files.length > 1) {
+        const action = await showRemoveJobDialog(job.files.length);
+        if (action === "cancel") return;
+        deleteFiles = action === "delete-files";
+    } else if (job.files && job.files.length === 1) {
+        deleteFiles = true;
+    }
+
+    if (deleteFiles && job.files && job.files.length > 0) {
+        try {
+            await api.fetchApi("/RunOnRunpod/delete-local-outputs", {
+                method: "POST",
+                body: JSON.stringify({ files: job.files }),
+            });
+        } catch (err) {
+            console.error("[RunOnRunpod] delete-local-outputs error:", err);
+        }
+    }
+
+    const idx = jobs.findIndex(j => j.id === jobId);
+    if (idx >= 0) jobs.splice(idx, 1);
+    renderJobList();
 }
 
 // --- Render full job list ---
@@ -793,6 +870,21 @@ const STYLES = `
         border-color: var(--p-red-500, #8e3a3a);
         color: var(--p-red-500, #cc4444);
     }
+    .runpod-job-remove {
+        background: none;
+        border: 1px solid var(--p-content-border-color, #555);
+        border-radius: 4px;
+        color: var(--p-text-muted-color, #888);
+        cursor: pointer;
+        font-size: 11px;
+        padding: 1px 5px;
+        line-height: 1;
+    }
+    .runpod-job-remove:hover {
+        background: color-mix(in srgb, var(--p-red-600, #cc4444) 30%, transparent);
+        border-color: var(--p-red-500, #8e3a3a);
+        color: var(--p-red-500, #cc4444);
+    }
     .runpod-warning {
         padding: 8px 12px;
         margin: 8px;
@@ -940,7 +1032,6 @@ app.registerExtension({
                         updates.message = `${message} (${uploaded_mb}/${total_mb} MB)`;
                         updates.uploadPercent = percent;
                     } else if (evt === "fetch_progress") {
-                        updates.uploadPercent = -1;
                         updates.fetchResults = results || [];
                     } else {
                         updates.uploadPercent = -1;
@@ -976,7 +1067,7 @@ app.registerExtension({
                     console.log(`[RunOnRunpod] Job ${job_id} completed, ${(files || []).length} file(s)`);
                     updateJob(job_id, {
                         state: JOB_STATE.COMPLETED,
-                        message: `Completed - ${(files || []).length} file(s)`,
+                        message: `Completed - ${(files || []).length} output file(s)`,
                         files: files || [],
                     });
                     break;
