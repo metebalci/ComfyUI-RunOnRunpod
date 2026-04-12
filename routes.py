@@ -818,22 +818,37 @@ async def check_latency(request):
 
 @routes.post("/RunOnRunpod/clean")
 async def clean_storage(request):
-    """Delete all objects under inputs/ or outputs/ prefix on S3."""
+    """Delete all objects under one or more prefixes on the network volume.
+
+    ``folder`` can be ``inputs``, ``outputs``, or ``all``. ``all`` deletes
+    inputs, outputs, **and models** — it's the nuke button.
+    """
     data = await request.json()
     settings = data.get("settings", {})
     folder = data.get("folder", "")
 
-    if folder not in ("inputs", "outputs"):
+    if folder == "all":
+        prefixes = ["inputs/", "outputs/", "models/"]
+    elif folder in ("inputs", "outputs"):
+        prefixes = [f"{folder}/"]
+    else:
         return web.json_response({"error": "Invalid folder"}, status=400)
 
     try:
         client = _make_s3_client(settings)
         bucket = settings.get("bucketName", "")
-        keys = list_objects(client, bucket, f"{folder}/")
-        if keys:
-            delete_objects(client, bucket, keys)
-            print(_PREFIX, f"Cleaned {len(keys)} object(s) from {folder}/")
-        return web.json_response({"deleted": len(keys)})
+        total_deleted = 0
+        per_prefix: dict[str, int] = {}
+        for prefix in prefixes:
+            keys = await asyncio.to_thread(list_objects, client, bucket, prefix)
+            if keys:
+                await asyncio.to_thread(delete_objects, client, bucket, keys)
+                total_deleted += len(keys)
+                per_prefix[prefix] = len(keys)
+                print(_PREFIX, f"Cleaned {len(keys)} object(s) from {prefix}")
+            else:
+                per_prefix[prefix] = 0
+        return web.json_response({"deleted": total_deleted, "per_prefix": per_prefix})
     except Exception as e:
         print(_PREFIX, f"Clean error: {e}")
         return web.json_response({"error": str(e)}, status=400)

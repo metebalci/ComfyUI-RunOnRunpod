@@ -487,6 +487,42 @@ async function cleanFolder(folder, btn) {
     }, 2000);
 }
 
+async function cleanAll(btn) {
+    const s = getSettings();
+    const msg =
+        `This will delete EVERYTHING on the network volume (s3://${s.bucketName}):\n\n` +
+        `  • inputs/\n  • outputs/\n  • models/  ← your uploaded models will be gone\n\n` +
+        `Models will need to be re-uploaded (or re-downloaded by the worker) on the next job.\n\n` +
+        `Are you absolutely sure?`;
+    if (!confirm(msg)) return;
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.classList.add("pulsing");
+    btn.textContent = `Cleaning everything...`;
+
+    try {
+        const res = await api.fetchApi("/RunOnRunpod/clean", {
+            method: "POST",
+            body: JSON.stringify({ folder: "all", settings: getSettings() }),
+        });
+        const data = await res.json();
+        if (data.error) {
+            btn.textContent = `Failed`;
+        } else {
+            btn.textContent = `Deleted ${data.deleted} file(s)`;
+        }
+    } catch (err) {
+        btn.textContent = `Failed`;
+    }
+
+    btn.classList.remove("pulsing");
+    setTimeout(() => {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }, 2000);
+}
+
 // --- CSS ---
 const STYLES = `
     .runpod-sidebar {
@@ -570,6 +606,14 @@ const STYLES = `
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    .runpod-btn.danger {
+        color: #cc8844;
+        border-color: #663311;
+    }
+    .runpod-btn.danger:hover {
+        background: #3a1a0a;
+        color: #ffaa66;
     }
     .runpod-btn.pulsing {
         animation: runpod-pulse 1s ease-in-out infinite;
@@ -1048,22 +1092,29 @@ app.registerExtension({
                     renderJobList();
                 });
 
-                const row1 = document.createElement("div");
-                row1.className = "runpod-toolbar-row";
-                row1.appendChild(runBtn);
-                row1.appendChild(cleanInputsBtn);
-                row1.appendChild(cleanOutputsBtn);
-                row1.appendChild(cleanJobsBtn);
-                toolbar.appendChild(row1);
+                const cleanAllBtn = document.createElement("button");
+                cleanAllBtn.className = "runpod-btn clean danger";
+                cleanAllBtn.textContent = "Clean Everything";
+                cleanAllBtn.title = "Delete ALL files on the network volume: inputs, outputs, AND models";
+                cleanAllBtn.addEventListener("click", () => cleanAll(cleanAllBtn));
 
                 const latencyBtn = document.createElement("button");
                 latencyBtn.className = "runpod-btn clean";
                 latencyBtn.textContent = "Check Latency";
-                latencyBtn.title = "Measure TCP connect latency to every RunPod S3 datacenter";
+                latencyBtn.title = "Measure HTTPS round-trip to every Runpod S3 datacenter";
                 latencyBtn.addEventListener("click", () => checkLatency(latencyBtn));
+
+                const row1 = document.createElement("div");
+                row1.className = "runpod-toolbar-row";
+                row1.appendChild(runBtn);
+                row1.appendChild(cleanJobsBtn);
+                toolbar.appendChild(row1);
 
                 const row2 = document.createElement("div");
                 row2.className = "runpod-toolbar-row";
+                row2.appendChild(cleanInputsBtn);
+                row2.appendChild(cleanOutputsBtn);
+                row2.appendChild(cleanAllBtn);
                 row2.appendChild(latencyBtn);
                 toolbar.appendChild(row2);
 
