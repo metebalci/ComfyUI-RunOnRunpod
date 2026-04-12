@@ -482,21 +482,42 @@ def download_file(client, bucket: str, key: str, dest: str):
             f.write(chunk)
 
 
-def delete_objects(client, bucket: str, keys: list[str]):
-    """Delete a list of S3 keys from the bucket using the batch
-    DeleteObjects API in chunks of 1000 (S3's hard limit per call).
+def delete_objects(client, bucket: str, keys: list[str], max_workers: int = 20):
+    """Delete a list of S3 keys from the bucket using parallel single-object
+    deletes.
 
-    An N-object delete is ceil(N/1000) API calls instead of N.
+    RunPod's S3 API doesn't support the batch DeleteObjects operation
+    (it returns HTTP 307 Temporary Redirect on the POST /?delete request),
+    so we fall back to per-object DeleteObject calls issued concurrently
+    from a thread pool. 20 workers gives us ~20× the throughput of a
+    sequential loop without tripping rate limits in practice.
     """
-    for i in range(0, len(keys), 1000):
-        chunk = keys[i:i + 1000]
-        client.delete_objects(
-            Bucket=bucket,
-            Delete={
-                "Objects": [{"Key": k} for k in chunk],
-                "Quiet": True,
-            },
+    if not keys:
+        return
+
+    errors: list[tuple[str, Exception]] = []
+
+    def _delete_one(key: str) -> None:
+        try:
+            client.delete_object(Bucket=bucket, Key=key)
+        except Exception as e:
+            errors.append((key, e))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(_delete_one, k) for k in keys]
+        for _ in as_completed(futures):
+            pass
+
+    if errors:
+        first_key, first_err = errors[0]
+        print(
+            f"{_PREFIX} {len(errors)}/{len(keys)} delete(s) failed; "
+            f"first: {first_key}: {first_err}"
         )
+        # Only raise if everything failed — otherwise the caller still
+        # wants the partial progress to count.
+        if len(errors) == len(keys):
+            raise RuntimeError(f"All {len(keys)} deletes failed: {first_err}") from first_err
 
 
 def list_objects(client, bucket: str, prefix: str) -> list[str]:
