@@ -25,8 +25,12 @@ RUN apt-get update && apt-get install -y \
 # Install RunPod SDK and handler dependencies (stable layer)
 RUN pip install runpod requests
 
-# Install ComfyUI at a specific tag (changes with new releases)
-ARG COMFYUI_TAG=latest
+# Install ComfyUI at a specific tag (changes with new releases).
+# Defaults to `master` so a bare `docker build ./worker` clones the
+# latest ComfyUI main branch. Override with --build-arg COMFYUI_TAG=v0.x.y
+# to pin to a specific release.
+ARG COMFYUI_TAG=master
+ENV COMFYUI_VERSION=${COMFYUI_TAG}
 RUN git clone --branch "${COMFYUI_TAG}" --depth 1 https://github.com/comfyanonymous/ComfyUI.git /comfyui
 WORKDIR /comfyui
 RUN pip install -r requirements.txt
@@ -43,6 +47,20 @@ RUN while IFS= read -r repo || [ -n "$repo" ]; do \
             pip install -r "/comfyui/custom_nodes/$name/requirements.txt"; \
         fi; \
     done < /tmp/custom_nodes.txt
+
+# Worker semver — bump in this file when anything in the worker image
+# changes deliberately (CUDA/torch bump, custom_nodes edit, handler
+# code change, Dockerfile restructure). Daily ComfyUI rebuilds do NOT
+# bump this; they only change the comfyui part of the image tag.
+ARG WORKER_VERSION=0.1.0
+ENV WORKER_VERSION=${WORKER_VERSION}
+
+# Wire-protocol version baked into the env so the worker can report
+# it back via the version action. The plugin uses it for a strict
+# equality check; mismatch is a hard error. MUST be kept in sync with
+# `PROTOCOL_VERSION` in the plugin's routes.py.
+ARG PROTOCOL_VERSION=1
+ENV PROTOCOL_VERSION=${PROTOCOL_VERSION}
 
 # Copy handler and start script last (changes often, small layer)
 COPY handler.py /handler.py

@@ -21,3 +21,4 @@ DisplayName = "Run on RunPod"
 Icon = "https://raw.githubusercontent.com/metebalci/ComfyUI-RunOnRunpod/main/icon.svg"
 includes = ["web"]
 "requires-comfyui" = ">=0.16.4"
+

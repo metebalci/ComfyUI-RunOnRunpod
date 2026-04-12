@@ -21,6 +21,26 @@ const JOB_STATE = {
 // --- Job list (newest first) ---
 let jobs = [];
 let jobListEl = null;
+let workerInfoEl = null;
+
+function renderWorkerInfo(info) {
+    if (!workerInfoEl) return;
+    if (!info || !info.worker_version) {
+        workerInfoEl.textContent = "Worker info appears after your first submit.";
+        return;
+    }
+    const parts = [
+        `Worker ${info.worker_version}`,
+        `protocol ${info.protocol_version}`,
+    ];
+    if (info.cuda_version) parts.push(`CUDA ${info.cuda_version}`);
+    if (info.pytorch_version) parts.push(`Torch ${info.pytorch_version}`);
+    if (info.comfyui_version && info.comfyui_version !== "unknown") {
+        parts.push(`ComfyUI ${info.comfyui_version}`);
+    }
+    workerInfoEl.textContent = parts.join(" · ");
+    workerInfoEl.title = parts.join("\n");
+}
 
 // localStorage persistence — only finished jobs are persisted, capped to
 // avoid unbounded growth. In-flight jobs are intentionally dropped on
@@ -767,6 +787,12 @@ const STYLES = `
     .runpod-sidebar .p-toolbar-end {
         display: flex;
     }
+    .runpod-version-label {
+        margin-left: 8px;
+        font-size: 11px;
+        font-weight: 400;
+        color: var(--p-text-muted-color, #888);
+    }
     .runpod-title-btn {
         display: inline-flex;
         align-items: center;
@@ -856,6 +882,15 @@ const STYLES = `
     @keyframes runpod-pulse {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.6; }
+    }
+    .runpod-worker-info {
+        padding: 6px 12px;
+        font-size: 11px;
+        color: var(--p-text-muted-color, #888);
+        border-bottom: 1px solid var(--p-content-border-color, #333);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .runpod-jobs {
         flex: 1;
@@ -1172,6 +1207,12 @@ app.registerExtension({
         api.addEventListener("runonrunpod", (event) => {
             const { event: evt, job_id, prep_id, message, files, error, percent, uploaded_mb, total_mb, results, total, result } = event.detail;
 
+            // Worker info push from the prep flow's version action.
+            if (evt === "worker_info") {
+                renderWorkerInfo(event.detail);
+                return;
+            }
+
             // Latency check events — bypass the job list entirely.
             if (evt === "latency_start") {
                 handleLatencyStart(total || 0);
@@ -1289,7 +1330,25 @@ app.registerExtension({
                 titleText.title = "Run on Runpod";
                 titleText.textContent = "Run on Runpod";
 
+                const versionLabel = document.createElement("span");
+                versionLabel.className = "runpod-version-label";
+                versionLabel.textContent = "";
+
                 titleStart.appendChild(titleText);
+                titleStart.appendChild(versionLabel);
+
+                api.fetchApi("/RunOnRunpod/info")
+                    .then(r => r.json())
+                    .then(info => {
+                        if (info && info.plugin_version) {
+                            versionLabel.textContent = `v${info.plugin_version} · p${info.protocol_version}`;
+                            versionLabel.title = `Plugin v${info.plugin_version}, protocol version ${info.protocol_version}`;
+                        }
+                        if (info && info.worker_info) {
+                            renderWorkerInfo(info.worker_info);
+                        }
+                    })
+                    .catch(err => console.error("[RunOnRunpod] info fetch error:", err));
 
                 const titleEnd = document.createElement("div");
                 titleEnd.className = "p-toolbar-end";
@@ -1390,12 +1449,20 @@ app.registerExtension({
                 row2.appendChild(latencyBtn);
                 toolbar.appendChild(row2);
 
+                // Worker info row — populated by the version action on
+                // first successful submit (cached server-side and pushed
+                // via the worker_info WebSocket event).
+                workerInfoEl = document.createElement("div");
+                workerInfoEl.className = "runpod-worker-info";
+                workerInfoEl.textContent = "Worker info appears after your first submit.";
+
                 // Job list (scrollable)
                 jobListEl = document.createElement("div");
                 jobListEl.className = "runpod-jobs";
 
                 container.appendChild(title);
                 container.appendChild(toolbar);
+                container.appendChild(workerInfoEl);
                 container.appendChild(jobListEl);
                 el.appendChild(container);
 

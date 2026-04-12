@@ -69,11 +69,13 @@ ComfyUI and custom nodes are bundled into the Docker image to minimize cold star
 
 A pre-built image is available at `docker.io/metebalci/comfyui-runonrunpod:latest` with the custom nodes listed in `worker/custom_nodes.txt`.
 
-To build your own image with different custom nodes:
+To build your own image with extra custom nodes:
 
 1. Edit `worker/custom_nodes.txt` to list the custom nodes you need (one git URL per line)
-2. Commit the change (the build script refuses to run with uncommitted worker changes so every published tag maps back to a real commit)
-3. Run `./build-docker.sh` from the repo root. The script tags the image as `cu130_torch211_comfyui<version>_<sha>` (where `<sha>` is the short SHA of the last commit that touched `worker/`) and also updates `:latest`. Edit `IMAGE` at the top of the script to point at your own Docker Hub user before pushing.
+2. `cd worker && docker build -t your-dockerhub-user/comfyui-runonrunpod:latest .`
+3. `docker push your-dockerhub-user/comfyui-runonrunpod:latest`
+
+By default the build clones the **`master`** branch of ComfyUI. To pin to a specific release, override the build arg: `docker build --build-arg COMFYUI_TAG=v0.18.6 -t your-dockerhub-user/comfyui-runonrunpod:latest .`. The worker version and protocol version are baked into `worker/Dockerfile` and don't need to be supplied.
 
 For quick testing, you can install extra custom nodes at startup without rebuilding the image by setting the `EXTRA_CUSTOM_NODES_URL` environment variable to a URL pointing to a text file with git URLs (same format as `custom_nodes.txt`). Nodes already baked into the image are skipped. This adds to cold start time, so for production use, rebuild the image instead.
 

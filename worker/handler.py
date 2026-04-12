@@ -1,3 +1,21 @@
+# RunPod serverless handler.
+#
+# WIRE PROTOCOL — keep in sync with the plugin.
+# This file implements the worker side of the plugin/worker action
+# protocol. The actions are: `version`, `node_list`, `fetch_models`,
+# and the default workflow run. Their input/output shapes are part of
+# the contract.
+#
+# If you change ANY of:
+#   - the action set (add/remove actions),
+#   - the request/response shape of an existing action,
+#   - the error format,
+# then bump BOTH:
+#   1. `ARG PROTOCOL_VERSION=...` in worker/Dockerfile
+#   2. `PROTOCOL_VERSION = ...` in routes.py (plugin side)
+# The plugin enforces strict equality between its own and the worker's
+# protocol_version on every submit; a mismatch is a hard error.
+
 import json
 import os
 import shutil
@@ -186,11 +204,33 @@ def handler(job):
     try:
         job_input = job["input"]
 
-        # Ping waits for ComfyUI to actually be reachable so the plugin's
-        # "Waiting for worker..." message covers the full cold-start.
-        if job_input.get("action") == "ping":
+        # Version action — combines liveness (waits for ComfyUI to be
+        # reachable so the plugin's "Waiting for worker..." message
+        # covers the full cold-start) with the full version manifest.
+        # The plugin uses protocol_version for a strict equality check;
+        # the rest is informational and shown in the sidebar.
+        if job_input.get("action") == "version":
             ready = wait_for_comfy()
-            return {"status": "ok" if ready else "comfy_not_ready"}
+            try:
+                protocol_version = int(os.environ.get("PROTOCOL_VERSION", "0"))
+            except ValueError:
+                protocol_version = 0
+            cuda_version = ""
+            pytorch_version = ""
+            try:
+                import torch
+                pytorch_version = torch.__version__
+                cuda_version = torch.version.cuda or ""
+            except Exception as e:
+                print(f"[RunOnRunpod] Could not introspect torch: {e}")
+            return {
+                "status": "ok" if ready else "comfy_not_ready",
+                "worker_version": os.environ.get("WORKER_VERSION", "unknown"),
+                "protocol_version": protocol_version,
+                "cuda_version": cuda_version,
+                "pytorch_version": pytorch_version,
+                "comfyui_version": os.environ.get("COMFYUI_VERSION", "unknown"),
+            }
 
         # Return node list if requested
         if job_input.get("action") == "node_list":

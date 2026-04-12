@@ -3,22 +3,25 @@ set -e
 
 REPO="comfyanonymous/ComfyUI"
 IMAGE="metebalci/comfyui-runonrunpod"
-CUDA_VERSION="cu130"
-TORCH_VERSION="torch211"
 
-# Refuse to build with uncommitted worker changes — every published tag
-# must map back to a real commit so the tag is reproducible.
+# Refuse to build with uncommitted worker changes — every published
+# tag must map back to a real commit so it stays reproducible.
 if ! git diff --quiet HEAD -- worker/ || ! git diff --quiet --cached HEAD -- worker/; then
     echo "Error: worker/ has uncommitted changes. Commit them before building."
     exit 1
 fi
 
-# Use the short SHA of the last commit that touched worker/. This keeps
-# the tag stable when unrelated parts of the repo change and only bumps
-# when the image content actually changes.
-WORKER_SHA=$(git log -1 --format=%h -- worker/)
-if [ -z "$WORKER_SHA" ]; then
-    echo "Error: could not find a commit for worker/"
+# Both worker_version and protocol_version live inside worker/Dockerfile
+# as ARG defaults — single source of truth for everything that ends up
+# in the image.
+WORKER_VERSION=$(sed -n 's/^ARG WORKER_VERSION=\(.*\)$/\1/p' worker/Dockerfile | head -1)
+if [ -z "$WORKER_VERSION" ]; then
+    echo "Error: could not read WORKER_VERSION from worker/Dockerfile"
+    exit 1
+fi
+PROTOCOL_VERSION=$(sed -n 's/^ARG PROTOCOL_VERSION=\(.*\)$/\1/p' worker/Dockerfile | head -1)
+if [ -z "$PROTOCOL_VERSION" ]; then
+    echo "Error: could not read PROTOCOL_VERSION from worker/Dockerfile"
     exit 1
 fi
 
@@ -35,12 +38,14 @@ fi
 
 # Strip 'v' prefix and dots for the image tag (v0.18.5 -> comfyui0185)
 COMFYUI_VERSION=$(echo "${COMFYUI_TAG#v}" | tr -d '.')
-IMAGE_TAG="${CUDA_VERSION}_${TORCH_VERSION}_comfyui${COMFYUI_VERSION}_${WORKER_SHA}"
+IMAGE_TAG="${WORKER_VERSION}-p${PROTOCOL_VERSION}-comfyui${COMFYUI_VERSION}"
 
-echo "Building with ComfyUI $COMFYUI_TAG and worker $WORKER_SHA -> $IMAGE:$IMAGE_TAG"
+echo "Building worker v$WORKER_VERSION (protocol $PROTOCOL_VERSION) with ComfyUI $COMFYUI_TAG -> $IMAGE:$IMAGE_TAG"
 
 docker build \
     --build-arg COMFYUI_TAG="$COMFYUI_TAG" \
+    --build-arg WORKER_VERSION="$WORKER_VERSION" \
+    --build-arg PROTOCOL_VERSION="$PROTOCOL_VERSION" \
     -t "$IMAGE:$IMAGE_TAG" \
     -t "$IMAGE:latest" \
     ./worker

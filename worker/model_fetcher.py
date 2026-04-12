@@ -3,6 +3,12 @@ the plugin, fetch each one onto the network volume with one retry on failure
 and SHA-256 verification when an expected hash is provided.
 
 Falls back on the client to re-upload any file this module cannot download.
+
+WIRE PROTOCOL — this module defines the per-file result shape that the
+``fetch_models`` action yields back to the plugin. If you change the
+descriptor input format or the result shape (``status``/``error`` keys
+etc.), that's a wire-protocol change: bump BOTH ``ARG PROTOCOL_VERSION``
+in worker/Dockerfile AND ``PROTOCOL_VERSION`` in routes.py.
 """
 
 import hashlib

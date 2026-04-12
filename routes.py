@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 
 import aiohttp
 from aiohttp import web
@@ -15,8 +16,35 @@ _PREFIX = "[RunOnRunpod]"
 routes = PromptServer.instance.routes
 
 
+def _read_plugin_version() -> str:
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyproject.toml")
+    try:
+        with open(path) as f:
+            for line in f:
+                m = re.match(r'^\s*version\s*=\s*"([^"]+)"', line)
+                if m:
+                    return m.group(1)
+    except Exception as e:
+        print(_PREFIX, f"Could not read plugin version from pyproject.toml: {e}")
+    return "unknown"
+
+
+PLUGIN_VERSION = _read_plugin_version()
+
+# Wire-protocol version. Bump this whenever the plugin/worker action
+# protocol changes (action set, input/output shapes, error format).
+# MUST be kept in sync with `ARG PROTOCOL_VERSION` in worker/Dockerfile.
+PROTOCOL_VERSION = 1
+
+
 # In-memory state for active jobs: {job_id: asyncio.Task}
 _active_tasks = {}
+
+# Last worker version manifest seen via the version action. Populated
+# on the first successful submit and reused by the sidebar /info
+# endpoint so we can show worker info without forcing another cold
+# start. Empty dict on startup.
+_last_worker_info: dict = {}
 
 # Set of prep_ids whose submit/prep phase has been cancelled. submit_job
 # checks membership at each cancellation-aware point; entries are discarded
@@ -378,13 +406,44 @@ async def _do_submit(data: dict):
             {"error": f"S3 storage error: {e}"}, status=400
         )
 
-    # Wait for worker to be available
+    # Wait for worker to be available + fetch its version manifest in
+    # one round trip. The version action calls wait_for_comfy() so the
+    # cold-start time stays under "Waiting for worker..." instead of
+    # leaking into the next step.
     _send_event("progress", {"prep_id": prep_id, "message": "Waiting for worker..."})
     try:
-        await _runpod_action(endpoint_id, api_key, "ping")
+        version_output = await _runpod_action(endpoint_id, api_key, "version")
     except Exception as e:
-        print(_PREFIX, f"Worker ping failed: {e}")
+        print(_PREFIX, f"Worker version request failed: {e}")
         return web.json_response({"error": f"Worker not available: {e}"}, status=500)
+
+    # Protocol version compatibility check. Strict equality — plugin
+    # and worker must declare matching protocol_version values.
+    if not isinstance(version_output, dict):
+        return web.json_response({"error": "Worker returned invalid version response."}, status=500)
+    worker_protocol = version_output.get("protocol_version")
+    if not isinstance(worker_protocol, int) or worker_protocol == 0:
+        msg = "Worker doesn't report a protocol version. Update your worker image."
+        print(_PREFIX, "ERROR:", msg)
+        return web.json_response({"error": msg}, status=400)
+    if worker_protocol != PROTOCOL_VERSION:
+        if worker_protocol < PROTOCOL_VERSION:
+            msg = f"Plugin/worker protocol mismatch (plugin={PROTOCOL_VERSION}, worker={worker_protocol}). Update your worker image."
+        else:
+            msg = f"Plugin/worker protocol mismatch (plugin={PROTOCOL_VERSION}, worker={worker_protocol}). Update your plugin."
+        print(_PREFIX, "ERROR:", msg)
+        return web.json_response({"error": msg}, status=400)
+
+    # Cache the worker info so the sidebar can display it without
+    # forcing another cold start, and push it to the panel now.
+    _last_worker_info.update({
+        "worker_version": version_output.get("worker_version", "unknown"),
+        "protocol_version": worker_protocol,
+        "cuda_version": version_output.get("cuda_version", ""),
+        "pytorch_version": version_output.get("pytorch_version", ""),
+        "comfyui_version": version_output.get("comfyui_version", "unknown"),
+    })
+    _send_event("worker_info", _last_worker_info)
 
     if prep_id in _cancelled_preps:
         print(_PREFIX, "Submit cancelled during worker ping")
@@ -853,6 +912,16 @@ async def check_latency(request):
         return web.json_response({"error": str(e)}, status=500)
     _send_event("latency_done", {"results": results})
     return web.json_response({"results": results})
+
+
+@routes.get("/RunOnRunpod/info")
+async def get_info(_request):
+    """Return plugin metadata + last seen worker info for the sidebar."""
+    return web.json_response({
+        "plugin_version": PLUGIN_VERSION,
+        "protocol_version": PROTOCOL_VERSION,
+        "worker_info": _last_worker_info or None,
+    })
 
 
 @routes.post("/RunOnRunpod/check-local-outputs")

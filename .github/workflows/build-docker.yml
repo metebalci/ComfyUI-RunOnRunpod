@@ -15,23 +15,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0  # need full history for `git log -1 -- worker/`
 
-      - name: Get latest ComfyUI tag and worker SHA
+      - name: Compute image tag
         id: meta
         run: |
+          WORKER_VERSION=$(sed -n 's/^ARG WORKER_VERSION=\(.*\)$/\1/p' worker/Dockerfile | head -1)
+          if [ -z "$WORKER_VERSION" ]; then
+            echo "Error: could not read WORKER_VERSION from worker/Dockerfile"
+            exit 1
+          fi
+          PROTOCOL_VERSION=$(sed -n 's/^ARG PROTOCOL_VERSION=\(.*\)$/\1/p' worker/Dockerfile | head -1)
+          if [ -z "$PROTOCOL_VERSION" ]; then
+            echo "Error: could not read PROTOCOL_VERSION from worker/Dockerfile"
+            exit 1
+          fi
           TAG=$(git ls-remote --tags --sort=-v:refname https://github.com/comfyanonymous/ComfyUI.git 'v*' \
             | head -1 \
             | sed 's/.*refs\/tags\///' \
             | sed 's/\^{}//')
           VERSION=$(echo "${TAG#v}" | tr -d '.')
-          WORKER_SHA=$(git log -1 --format=%h -- worker/)
-          IMAGE_TAG="cu130_torch211_comfyui${VERSION}_${WORKER_SHA}"
+          IMAGE_TAG="${WORKER_VERSION}-p${PROTOCOL_VERSION}-comfyui${VERSION}"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "worker_sha=$WORKER_SHA" >> $GITHUB_OUTPUT
+          echo "worker_version=$WORKER_VERSION" >> $GITHUB_OUTPUT
+          echo "protocol_version=$PROTOCOL_VERSION" >> $GITHUB_OUTPUT
           echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "ComfyUI tag: $TAG, worker SHA: $WORKER_SHA -> image tag: $IMAGE_TAG"
+          echo "Worker v$WORKER_VERSION (protocol $PROTOCOL_VERSION) with ComfyUI $TAG -> image tag: $IMAGE_TAG"
 
       - name: Check if image already exists
         id: check
@@ -64,6 +72,8 @@ jobs:
           push: true
           build-args: |
             COMFYUI_TAG=${{ steps.meta.outputs.tag }}
+            WORKER_VERSION=${{ steps.meta.outputs.worker_version }}
+            PROTOCOL_VERSION=${{ steps.meta.outputs.protocol_version }}
           tags: |
             metebalci/comfyui-runonrunpod:${{ steps.meta.outputs.image_tag }}
             metebalci/comfyui-runonrunpod:latest
