@@ -73,6 +73,18 @@ def _regions_cache_path() -> str:
     return os.path.join(_cache_dir(), "regions.json")
 
 
+def _is_valid_region_host(host: str) -> bool:
+    """Guard against stale caches / bad scrapes leaking junk region codes
+    like the ``s3api-datacenter.runpod.io`` placeholder through.
+    """
+    m = _HOST_RE.fullmatch(host)
+    return m is not None
+
+
+def _filter_regions(regions: list[dict]) -> list[dict]:
+    return [r for r in regions if _is_valid_region_host(r.get("host", ""))]
+
+
 def _fetch_docs_page(timeout: int = 15) -> Optional[str]:
     try:
         req = urllib.request.Request(
@@ -99,7 +111,11 @@ def fetch_regions() -> list[dict]:
         if age < _REGIONS_CACHE_TTL:
             try:
                 with open(cache_path, "r") as f:
-                    return json.load(f)
+                    cached = _filter_regions(json.load(f))
+                if cached:
+                    return cached
+                # Cache exists but every entry is invalid — fall through
+                # to a fresh scrape (e.g. older cache from a looser regex).
             except (json.JSONDecodeError, OSError):
                 pass  # fall through to re-fetch
 
@@ -109,8 +125,10 @@ def fetch_regions() -> list[dict]:
         if os.path.exists(cache_path):
             try:
                 with open(cache_path, "r") as f:
+                    cached = _filter_regions(json.load(f))
+                if cached:
                     print(f"{_PREFIX} Using stale regions cache")
-                    return json.load(f)
+                    return cached
             except (json.JSONDecodeError, OSError):
                 pass
         raise RuntimeError(
