@@ -46,6 +46,7 @@ RUN while IFS= read -r repo || [ -n "$repo" ]; do \
 
 # Copy handler and start script last (changes often, small layer)
 COPY handler.py /handler.py
+COPY model_fetcher.py /model_fetcher.py
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 

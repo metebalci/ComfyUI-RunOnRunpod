@@ -22,6 +22,7 @@ function addJob(jobId) {
         message: "Preparing...",
         files: [],
         uploadPercent: -1,
+        fetchResults: null, // [{filename, status, error?}] during worker fetch_models
         createdAt: new Date(),
     };
     jobs.unshift(job);
@@ -53,6 +54,9 @@ function getSettings() {
         deleteInputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteInputsAfterJob") ?? false,
         deleteOutputsAfterJob: app.extensionManager.setting.get("Run on Runpod.Job.deleteOutputsAfterJob") ?? true,
         uploadMissingModels: app.extensionManager.setting.get("Run on Runpod.Job.uploadMissingModels") ?? true,
+        downloadFromTheSource: app.extensionManager.setting.get("Run on Runpod.Job.downloadFromTheSource") ?? false,
+        civitaiApiKey: app.extensionManager.setting.get("Run on Runpod.Keys.civitaiApiKey") || "",
+        hfToken: app.extensionManager.setting.get("Run on Runpod.Keys.hfToken") || "",
     };
 }
 
@@ -124,6 +128,21 @@ function renderJobCard(job) {
         ? `<button class="runpod-job-cancel" data-job-id="${job.id}" title="Cancel">X</button>`
         : "";
 
+    let fetchListHtml = "";
+    if (job.fetchResults && job.fetchResults.length > 0) {
+        const rows = job.fetchResults.map(r => {
+            const icon = r.status === "done" ? "✓"
+                : r.status === "failed" ? "✗"
+                : "…";
+            const color = r.status === "done" ? "#44cc44"
+                : r.status === "failed" ? "#cc4444"
+                : "#cccc44";
+            const title = r.error ? ` title="${r.error.replace(/"/g, "&quot;")}"` : "";
+            return `<div class="runpod-fetch-item"${title}><span style="color:${color};font-weight:600;">${icon}</span> ${r.filename}</div>`;
+        }).join("");
+        fetchListHtml = `<div class="runpod-fetch-list">${rows}</div>`;
+    }
+
     card.innerHTML = `
         <div class="runpod-job-header">
             <span class="runpod-job-time">${time}</span>
@@ -135,6 +154,7 @@ function renderJobCard(job) {
         <div class="runpod-job-id" title="${job.id}">${job.id}</div>
         <div class="runpod-job-message">${job.message || ""}</div>
         <div class="runpod-job-progress">${job.uploadPercent >= 0 ? `<div class="runpod-job-progress-bar" style="width:${job.uploadPercent}%"></div>` : ""}</div>
+        ${fetchListHtml}
         ${previewHtml}
     `;
 
@@ -442,6 +462,19 @@ const STYLES = `
         border-radius: 4px;
         margin-top: 6px;
     }
+    .runpod-fetch-list {
+        margin-top: 6px;
+        font-size: 11px;
+        color: #aaa;
+        max-height: 120px;
+        overflow-y: auto;
+    }
+    .runpod-fetch-item {
+        padding: 1px 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
     .runpod-job-cancel {
         background: none;
         border: 1px solid #555;
@@ -480,6 +513,13 @@ app.registerExtension({
 
     settings: [
         {
+            id: "Run on Runpod.Job.downloadFromTheSource",
+            name: "Download from the source when possible",
+            type: "boolean",
+            defaultValue: false,
+            tooltip: "When enabled, missing models are downloaded directly by the worker from their original source (ComfyUI Manager database, HuggingFace cache URL, or CivitAI) instead of being uploaded from your machine. Much faster for large checkpoints since the worker has datacenter bandwidth. File hashes may be sent to CivitAI to identify models when enabled.",
+        },
+        {
             id: "Run on Runpod.Job.uploadMissingModels",
             name: "Upload missing models automatically",
             type: "boolean",
@@ -496,6 +536,22 @@ app.registerExtension({
             name: "Delete inputs from network volume after job",
             type: "boolean",
             defaultValue: false,
+        },
+        {
+            id: "Run on Runpod.Keys.hfToken",
+            name: "HuggingFace Token",
+            type: "text",
+            defaultValue: "",
+            attrs: { type: "password" },
+            tooltip: "Optional. Used when 'Download from the source' is enabled and the worker needs to fetch gated/private HuggingFace models.",
+        },
+        {
+            id: "Run on Runpod.Keys.civitaiApiKey",
+            name: "CivitAI API Key",
+            type: "text",
+            defaultValue: "",
+            attrs: { type: "password" },
+            tooltip: "Optional. Used when 'Download from the source' is enabled and the worker needs to fetch CivitAI models that require authentication.",
         },
         {
             id: "Run on Runpod.Keys.s3SecretKey",
@@ -551,10 +607,10 @@ app.registerExtension({
 
         // WebSocket event handling — route to correct job
         api.addEventListener("runonrunpod", (event) => {
-            const { event: evt, job_id, prep_id, message, files, error, percent, uploaded_mb, total_mb } = event.detail;
+            const { event: evt, job_id, prep_id, message, files, error, percent, uploaded_mb, total_mb, results } = event.detail;
 
-            // For progress/upload events during preparation, route by prep_id
-            if (evt === "progress" || evt === "upload_progress") {
+            // For progress/upload/fetch events during preparation, route by prep_id
+            if (evt === "progress" || evt === "upload_progress" || evt === "fetch_progress") {
                 const targetId = prep_id || job_id;
                 const prepJob = targetId ? findJob(targetId) : null;
                 if (prepJob) {
@@ -562,6 +618,9 @@ app.registerExtension({
                     if (evt === "upload_progress" && percent != null) {
                         updates.message = `${message} (${uploaded_mb}/${total_mb} MB)`;
                         updates.uploadPercent = percent;
+                    } else if (evt === "fetch_progress") {
+                        updates.uploadPercent = -1;
+                        updates.fetchResults = results || [];
                     } else {
                         updates.uploadPercent = -1;
                     }

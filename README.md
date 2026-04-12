@@ -33,6 +33,24 @@ A Docker image that runs ComfyUI on RunPod. The worker:
 - Requires **zero configuration** — no S3 credentials or environment variables needed
 - Uses a RunPod **network volume** for models, inputs, and outputs
 
+## Quickstart
+
+From zero to a first successful run:
+
+1. **Create a network volume** on RunPod. Pick a region that has the GPU availability you want to use — the endpoint in the next step must live in the same region. Note the volume ID. The region and S3 endpoint URL are shown under **Storage → S3 API Access** on the RunPod dashboard.
+2. **Create a Serverless endpoint** — type **Queue-based**, image `docker.io/metebalci/comfyui-runonrunpod:latest`, attach the network volume from step 1, set idle timeout to 30–60s. Note the endpoint ID.
+3. **Get credentials** from the RunPod dashboard:
+   - API key (Settings → API Keys)
+   - S3 access key + secret (Storage → S3 API Keys)
+   - Region and S3 endpoint URL (Storage → S3 API Access)
+4. **Install the plugin** in your local ComfyUI: `comfy node install comfyui-runonrunpod`, then restart ComfyUI.
+5. **Configure** in ComfyUI Settings → *Run on Runpod*: paste the API key, S3 keys, endpoint ID, bucket name (= volume ID), region, and endpoint URL.
+6. **Open a workflow** — the Z-Image workflow from the ComfyUI tutorials is a good starting point, but any workflow will do.
+7. **Download the required models locally** into your local ComfyUI `models/` directory. The plugin uploads models to the network volume on demand by reading them from your local ComfyUI install — if a model isn't present locally, the plugin can't upload it and the job will fail.
+8. **Run** — open the Run on Runpod sidebar (cloud icon) and click **Run**. The plugin uploads any missing models/inputs, submits to RunPod, and downloads outputs back to your local `output/` when the job finishes.
+
+See [Setup](#setup) below for more detail on each step, including building a custom worker image.
+
 ## Setup
 
 ### 1. Prepare the network volume
@@ -67,7 +85,7 @@ For quick testing, you can install extra custom nodes at startup without rebuild
 
 The Docker image uses prebuilt flash-attn wheels from [mjun0812/flash-attention-prebuild-wheels](https://github.com/mjun0812/flash-attention-prebuild-wheels).
 
-Create a RunPod Serverless endpoint using the image, with the network volume attached.
+Create a RunPod Serverless endpoint using the image, with the network volume attached. The endpoint must be a **Queue-based** endpoint — the plugin submits jobs via RunPod's `/run` async API and polls `/status/{job_id}`, which is only supported on queue-based endpoints (not load-balanced ones).
 
 ### 3. Install the plugin
 
@@ -95,6 +113,7 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
 
 **Job:**
 - Upload missing models automatically — default on
+- Download from the source when possible — default off (see Storage Architecture)
 - Delete inputs from network volume after job — default off
 - Delete outputs from network volume after job — default on (outputs are downloaded locally first)
 
@@ -102,6 +121,8 @@ Open ComfyUI Settings and find the **Run on Runpod** section:
 - API Key — RunPod API key
 - S3 Access Key — from RunPod S3 API keys
 - S3 Secret Key — from RunPod S3 API keys
+- CivitAI API Key — optional, used only with "Download from the source" for authenticated CivitAI downloads
+- HuggingFace Token — optional, used only with "Download from the source" for gated/private HuggingFace repos
 
 **Serverless:**
 - Endpoint ID — your RunPod Serverless endpoint ID
@@ -135,6 +156,15 @@ Everything lives on the RunPod network volume:
 - **Outputs** — `/outputs/` (worker writes as local files, accessible via RunPod S3 API)
 
 When you submit a job, the plugin scans the workflow for model loader nodes (CheckpointLoader, LoraLoader, VAELoader, CLIPLoader, UNETLoader, ControlNetLoader, etc.) and checks if each model exists on the network volume. Missing models are automatically uploaded from your local ComfyUI models directory. This can be disabled in settings.
+
+**Download from the source (optional, opt-in).** For very large models, uploading from a home connection is the slow part of the first run. With the **Download from the source when possible** setting enabled, the plugin tries to find a remote source for each missing model and has the worker fetch it directly onto the network volume over the datacenter's much faster connection. Lookup order:
+
+1. **ComfyUI-Manager model database** — filename match against Manager's curated `model-list.json`. No external calls per model; the database itself is fetched once per 24h from GitHub.
+2. **HuggingFace cache reverse-lookup** — if a model resolves to a file inside your local `~/.cache/huggingface/hub/`, the plugin recovers the repo ID and asks the worker to re-download from HuggingFace. Local filesystem only, no network calls for the lookup.
+3. **CivitAI by hash** — the plugin hashes the local file and queries CivitAI's `by-hash` API. This is the only step that sends data externally: the SHA-256 of the file is sent to CivitAI to identify the model.
+4. **Fallback** — any model the lookup chain can't resolve is uploaded from your local file the normal way.
+
+If the worker fails to download a file (404, network error, hash mismatch), it reports the failure back and the plugin falls back to uploading that specific file locally — the feature is purely a performance improvement, never a single point of failure. Gated HuggingFace repos or authenticated CivitAI downloads can be unlocked by configuring **HuggingFace Token** and **CivitAI API Key** in the Keys section.
 
 Input files are deduplicated using content hashing (SHA-256). Each file is stored as `inputs/{hash}{ext}`, so uploading the same image across multiple jobs skips the upload entirely.
 

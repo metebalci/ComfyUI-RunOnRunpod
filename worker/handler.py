@@ -5,6 +5,8 @@ import time
 import requests
 import runpod
 
+from model_fetcher import download_one, FetchError
+
 COMFY_URL = "http://127.0.0.1:8188"
 COMFY_INPUT_DIR = "/comfyui/input"
 COMFY_OUTPUT_DIR = "/comfyui/output"
@@ -100,6 +102,66 @@ def get_node_list() -> list[str]:
     return list(resp.json().keys())
 
 
+def run_fetch_models(job: dict, job_input: dict) -> dict:
+    """Download models from their source URLs onto the network volume.
+
+    Emits progress via runpod.serverless.progress_update after each file so
+    the plugin can stream per-file status back to the user. Returns a final
+    summary dict with per-file results — files that failed are reported as
+    ``status: failed`` so the client can fall back to a local upload for them.
+    """
+    downloads = job_input.get("downloads", []) or []
+    hf_token = job_input.get("hf_token") or None
+    civitai_key = job_input.get("civitai_key") or None
+
+    total = len(downloads)
+    results: list[dict] = []
+
+    # Initial progress so the client sees the worker has picked up the job.
+    runpod.serverless.progress_update(
+        job,
+        {"action": "fetch_models", "total": total, "current_index": 0, "results": []},
+    )
+
+    for idx, descriptor in enumerate(downloads):
+        filename = os.path.basename(descriptor.get("dest_path", ""))
+        # Send a "downloading" update before starting the file.
+        runpod.serverless.progress_update(
+            job,
+            {
+                "action": "fetch_models",
+                "total": total,
+                "current_index": idx,
+                "current_filename": filename,
+                "current_status": "downloading",
+                "results": list(results),
+            },
+        )
+        try:
+            download_one(descriptor, hf_token=hf_token, civitai_key=civitai_key)
+            results.append({"filename": filename, "status": "done"})
+        except FetchError as e:
+            print(f"[RunOnRunpod] fetch_models: {filename} failed: {e}")
+            results.append({"filename": filename, "status": "failed", "error": str(e)})
+        except Exception as e:
+            print(f"[RunOnRunpod] fetch_models: {filename} unexpected error: {e}")
+            results.append({"filename": filename, "status": "failed", "error": str(e)})
+
+        # After the file, push an update with the completed slot so the
+        # client's per-file list can advance even before the next file starts.
+        runpod.serverless.progress_update(
+            job,
+            {
+                "action": "fetch_models",
+                "total": total,
+                "current_index": idx + 1,
+                "results": list(results),
+            },
+        )
+
+    return {"action": "fetch_models", "total": total, "results": results}
+
+
 def handler(job):
     """RunPod serverless handler."""
     try:
@@ -112,6 +174,11 @@ def handler(job):
         # Return node list if requested
         if job_input.get("action") == "node_list":
             return {"node_list": get_node_list()}
+
+        # Fetch missing models from their original source (HF/CivitAI/Manager URLs)
+        # directly onto the network volume. See routes.py _submit_fetch_models.
+        if job_input.get("action") == "fetch_models":
+            return run_fetch_models(job, job_input)
 
         workflow = job_input["workflow"]
         input_files = job_input.get("input_files", {})
